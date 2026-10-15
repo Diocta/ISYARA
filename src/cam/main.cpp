@@ -36,9 +36,13 @@ static const char* _STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=12
 static const char* _STREAM_BOUNDARY = "\r\n--123456789000000000000987654321\r\n";
 static const char* _STREAM_PART = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
 
+// Ukuran frame harus sama dengan input model di ESP32-S3.
+#define AI_FRAME_SIZE 9216
+
 // Fungsi untuk mengirim 1 frame gambar AI ke ESP32-S3 ketika diminta (Handshake)
 void kirim_frame_ke_s3(camera_fb_t * fb) {
   if (!fb) return;
+  if (fb->len != AI_FRAME_SIZE) return;
   Serial.write(0xAA);
   Serial.write(0x55);
   Serial.write(fb->buf, fb->len);
@@ -136,8 +140,8 @@ void startCameraServer() {
 void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // Matikan brownout detector
 
-  // Baudrate 230400 untuk komunikasi stabil
-  Serial.begin(230400);
+  // Baudrate harus sama dengan ESP32-S3
+  Serial.begin(460800);
 
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;

@@ -42,7 +42,7 @@
 #include <stdint.h>
 #include <vector>
 #include "model_metadata.h"
-#include "tflite-model/tflite_learn_1136622_3_compiled.h"
+#include "tflite-model/tflite_learn_1136622_3.h"
 #include "edge-impulse-sdk/classifier/ei_model_types.h"
 #include "edge-impulse-sdk/classifier/inferencing_engines/engines.h"
 #include "edge-impulse-sdk/classifier/postprocessing/ei_postprocessing_common.h"
@@ -78,13 +78,11 @@ ei_model_dsp_t ei_dsp_blocks_1136622_1[ei_dsp_blocks_1136622_1_size] = {
         nullptr, // data normalization config
     }
 };
-const ei_config_tflite_eon_graph_t ei_config_graph_1136622_3 = {
+const ei_config_tflite_graph_t ei_config_graph_1136622_3 = {
     .implementation_version = 1,
-    .model_init = &tflite_learn_1136622_3_init,
-    .model_invoke = &tflite_learn_1136622_3_invoke,
-    .model_reset = &tflite_learn_1136622_3_reset,
-    .model_input = &tflite_learn_1136622_3_input,
-    .model_output = &tflite_learn_1136622_3_output,
+    .model = tflite_learn_1136622_3,
+    .model_size = tflite_learn_1136622_3_len,
+    .arena_size = tflite_learn_1136622_3_arena_size
 };
 
 const uint8_t ei_output_tensors_indices_1136622_3[1] = { 0 };
@@ -95,7 +93,7 @@ ei_learning_block_config_tflite_graph_t ei_learning_block_config_1136622_3 = {
     .output_tensors_indices = ei_output_tensors_indices_1136622_3,
     .output_tensors_size = ei_output_tensors_size_1136622_3,
     .quantized = 1,
-    .compiled = 1,
+    .compiled = 0,
     .graph_config = (void*)&ei_config_graph_1136622_3,
     .dequantize_output = 0,
 };
@@ -143,7 +141,7 @@ const ei_impulse_t impulse_1136622_1 = {
     .project_name = "BISINDO",
     .impulse_id = 1,
     .impulse_name = "Impulse #1",
-    .deploy_version = 1,
+    .deploy_version = 3,
 
     .nn_input_frame_size = 9216,
     .raw_sample_count = 9216,

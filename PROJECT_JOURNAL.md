@@ -48,3 +48,46 @@ Dokumen ini berfungsi sebagai rekam jejak (changelog) dan dokumentasi berkelanju
     - Menambahkan ambang batas **Confidence Threshold (55%)**: Jika tidak ada pose tangan atau akurasi di bawah 55%, sistem masuk ke mode `Idle (-)` dan tidak akan mengetik huruf salah ke dalam kalimat.
     - Kedua firmware berhasil dikompilasi 100% sukses.
 
+- **[13 Oktober 2026 - UART HANDSHAKE DIAGNOSTIK]**:
+  - Daya ESP32-CAM berhasil dipastikan menggunakan pin 5V yang benar dari expansion board dengan adaptor eksternal 12V pada input expansion. ESP32-CAM dapat menyala, terhubung Wi-Fi, dan menyediakan web stream.
+  - Karena OLED tetap menampilkan status handshake setelah masalah daya selesai, fokus diagnosis dipindahkan dari daya ke komunikasi UART. AI Edge Impulse belum menjadi sumber masalah karena inferensi hanya dijalankan setelah frame 9216 byte diterima penuh.
+  - Mengubah baud rate komunikasi UART pada `src/s3/main.cpp` dan `src/cam/main.cpp` dari `230400` menjadi `460800` sebagai kompromi antara kecepatan transfer dan stabilitas kabel.
+  - Memperpanjang timeout pencarian header menjadi 1000 ms dan timeout penerimaan frame menjadi 1000 ms.
+  - Memperbaiki parser header pada ESP32-S3 agar mencari pasangan byte `0xAA 0x55` secara berurutan, bukan hanya membaca dua byte sekaligus. Ini mencegah header terlewat jika byte tiba tidak tepat bersamaan.
+  - Menambahkan status diagnostik UART pada OLED dan Serial Monitor untuk membedakan header tidak diterima dari frame yang tidak lengkap.
+  - Menambahkan validasi ukuran frame di ESP32-CAM; frame hanya dikirim jika ukurannya tepat 9216 byte sesuai input model 96x96 grayscale.
+  - Setelah perubahan ini, kedua firmware perlu di-upload ulang: environment `esp32cam` ke ESP32-CAM dan environment `esp32s3` ke ESP32-S3.
+
+- **[14 Oktober 2026 - KONFIGURASI MEMORI ESP32-S3 N16R8]**:
+  - Log Serial Monitor ESP32-S3 menunjukkan bahwa UART telah menerima data kamera setidaknya sebagian (`6826/9216` byte), sehingga pin `U0T` dan `U0R` ESP32-CAM serta GPIO17/GPIO18 ESP32-S3 bukan lagi tersangka utama.
+  - Log juga menunjukkan `Failed to allocate tensor arena`. Model BISINDO membutuhkan arena TensorFlow Lite hingga 256403 byte, tetapi sebelumnya dialokasikan secara dinamis dari heap internal ESP32-S3 dan gagal mendapatkan blok memori berukuran besar.
+  - Modul ESP32-S3 yang digunakan bertanda N16R8, sedangkan definisi board PlatformIO semula adalah varian N8 tanpa PSRAM. Environment `esp32s3` diperbarui untuk flash 16 MB, partisi `default_16MB.csv`, dan tipe memori `qio_opi` agar PSRAM OPI digunakan.
+  - Arena model Edge Impulse tetap dialokasikan dinamis, tetapi alokasi berukuran besar (minimal 64 KB) kini diarahkan ke PSRAM melalui `heap_caps_calloc()` bila PSRAM tersedia. Cara ini menghindari kegagalan alokasi heap sekaligus mempertahankan RAM internal untuk OLED, UART, dan Arduino.
+  - Menambahkan log Serial Monitor `PSRAM: <total> byte, bebas: <jumlah> byte` saat ESP32-S3 menyala untuk memverifikasi PSRAM benar-benar aktif.
+  - Pengujian perangkat mengonfirmasi PSRAM aktif (sekitar 8 MB). Inisialisasi model kemudian menemukan batas default 10 buffer overflow Edge Impulse terlalu kecil untuk model ini, menghasilkan pesan `Failed to allocate persistent buffer ... EI_MAX_OVERFLOW_BUFFER_COUNT` dan reset berulang.
+  - Menetapkan `EI_MAX_OVERFLOW_BUFFER_COUNT=128` pada environment `esp32s3` agar buffer persisten kecil yang diperlukan model dapat dialokasikan. Header porting Edge Impulse disesuaikan agar batas khusus ESP32-S3 tidak menimpa nilai konfigurasi proyek tersebut. Jika inferensi tetap gagal, OLED sekarang menampilkan `ERR` dan Serial Monitor mencetak kode error tanpa membuat program berhenti pada status siap.
+  - Backtrace berikutnya menunjukkan `CORRUPT HEAP: Bad tail` saat runtime mereset arena model. Penyebabnya adalah arena bawaan model terkompilasi hanya 246720 byte, lebih kecil daripada kebutuhan model 256403 byte pada metadata. Konfigurasi `EI_TENSOR_ARENA_SIZE=286720` ditambahkan sebagai arena 280 KB di PSRAM, sehingga tersedia margin 30317 byte di atas kebutuhan metadata dan model tidak perlu menulis melewati arena/buffer overflow.
+  - Hanya firmware environment `esp32s3` yang perlu di-upload ulang untuk perubahan ini. Firmware `esp32cam` dan wiring tidak berubah pada tahap ini.
+
+- **[14 Oktober 2026 - MIGRASI RUNTIME TENSORFLOW LITE]**:
+  - Runtime EON Compiler dari deployment awal menghasilkan `CORRUPT HEAP` saat model mereset overflow buffer pada ESP32-S3, walaupun PSRAM 8 MB telah terdeteksi dengan benar.
+  - Library deployment baru dari Edge Impulse dipilih menggunakan opsi **TensorFlow Lite** (bukan EON Compiler). Metadata library baru menetapkan `EI_CLASSIFIER_COMPILED = 0`, sehingga inferensi memakai TensorFlow Lite Micro standar.
+  - Library EON sebelumnya dipertahankan sebagai cadangan pada `lib/BISINDO_inferencing_eon_backup/`. Library TensorFlow Lite baru dipasang sebagai `lib/BISINDO_inferencing/`.
+  - Konfigurasi khusus EON (`EI_MAX_OVERFLOW_BUFFER_COUNT` dan `EI_TENSOR_ARENA_SIZE`) dihapus dari `platformio.ini` karena tidak digunakan oleh runtime TensorFlow Lite Micro standar.
+  - Override `ei_calloc()` pada firmware ESP32-S3 tetap digunakan untuk mengarahkan alokasi besar TensorFlow Lite Micro ke PSRAM.
+  - Hanya environment `esp32s3` yang perlu di-build dan di-upload ulang. ESP32-CAM serta wiring UART tidak berubah.
+
+- **[14 Oktober 2026 - ARENA TENSORFLOW LITE MICRO]**:
+  - Pengujian runtime TensorFlow Lite standar mencapai `AllocateTensors()`, tetapi gagal dengan kode `EI_IMPULSE_TFLITE_ERROR (-3)`. Firmware tidak reboot dan OLED menampilkan `ERR`, sehingga jalur kamera, UART, PSRAM, dan error handling sudah bekerja.
+  - Library hasil deployment menyediakan arena 256403 byte, tetapi ukuran tersebut tidak cukup untuk tensor, metadata, alignment, dan scratch buffer TensorFlow Lite Micro pada ESP32-S3.
+  - Menambahkan konfigurasi `EI_CLASSIFIER_TFLITE_ARENA_SIZE=524288` (512 KB) pada environment `esp32s3`.
+  - Runtime `tflite_micro.h` diperbarui agar memakai ukuran terbesar antara kebutuhan metadata model dan konfigurasi proyek, untuk alokasi arena serta konstruktor `MicroInterpreter`.
+  - Arena 512 KB tetap dialokasikan dinamis melalui `ei_calloc()` ke PSRAM; RAM internal tetap tersedia untuk UART, OLED, dan sistem Arduino.
+  - Hanya firmware `esp32s3` perlu di-upload ulang setelah build berhasil. ESP32-CAM dan wiring tidak berubah.
+
+- **[15 Oktober 2026 - UX HOLD-TO-TYPE OLED]**:
+  - Pengujian perangkat berhasil mengenali beberapa pose BISINDO A-I dan menampilkan status `Idle` saat tidak ada pose. Perbedaan akurasi antarhuruf, khususnya kecenderungan kelas `I`, dicatat sebagai prioritas perbaikan dataset dan penambahan kelas `idle/background` pada pelatihan berikutnya.
+  - Mengganti label teks `Kunci:` pada OLED dengan ikon jam saat pose sedang ditahan dan ikon centang saat huruf berhasil disimpan. Progress bar tahan pose tetap dipertahankan.
+  - Menambahkan state `menunggu_lepas_tangan`: satu pose hanya dapat menambahkan satu huruf. Setelah huruf tersimpan, sistem menampilkan centang dan menunggu tangan/pose hilang selama 600 ms sebelum menerima huruf berikutnya. Ini mencegah teks berulang seperti `EEEE` atau `IIII` saat pose terus ditahan.
+  - Teks hasil tidak dihapus otomatis; penghapusan, spasi, dan bersihkan teks direncanakan pada tahap tombol Braille/push button.
+  - Hanya firmware environment `esp32s3` perlu di-upload ulang. ESP32-CAM, model, dan wiring tidak berubah.

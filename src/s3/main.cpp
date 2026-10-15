@@ -3,6 +3,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <BISINDO_inferencing.h>
+#include <esp_heap_caps.h>
 
 // Pin I2C untuk Layar OLED 0.96"
 #define I2C_SDA 8
@@ -12,24 +13,48 @@
 #define SCREEN_HEIGHT 64
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
-// Pin Serial1 untuk komunikasi dengan ESP32-CAM (Kecepatan Stabil)
+// Pin Serial1 untuk komunikasi dengan ESP32-CAM
 #define RX_CAM 18
 #define TX_CAM 17
-#define CAM_BAUD 230400
+#define CAM_BAUD 460800
 
 // Buffer Gambar 96x96 Grayscale (9216 bytes)
 #define IMG_SIZE 9216
+#define HEADER_TIMEOUT_MS 1000
+#define FRAME_TIMEOUT_MS 1000
 uint8_t img_buffer[IMG_SIZE];
 
 unsigned long paket_sukses_total = 0;
 unsigned long last_diag_update = 0;
+const char* status_uart = "Handshake (Ketuk)...";
 
 // Logika Pembentukan Kata/Kalimat
 String kalimat = "";
 String huruf_terakhir = "";
+String huruf_terkunci = "";
 unsigned long waktu_deteksi_mulai = 0;
+unsigned long waktu_pose_hilang = 0;
 const unsigned long HOLD_TIME_MS = 1200; // Tahan pose 1.2 detik untuk mengunci huruf
+const unsigned long RELEASE_TIME_MS = 600; // Lepaskan tangan sebelum huruf berikutnya
 const float CONFIDENCE_THRESHOLD = 0.55f; // Ambang batas keyakinan 55%
+bool menunggu_lepas_tangan = false;
+
+// Edge Impulse meminta blok besar untuk tensor arena; gunakan PSRAM bila tersedia.
+void *ei_calloc(size_t nitems, size_t size) {
+  if (nitems == 0 || size == 0 || nitems > SIZE_MAX / size) {
+    return nullptr;
+  }
+
+  size_t total = nitems * size;
+  if (total >= 65536 && psramFound()) {
+    void *memory = heap_caps_calloc(nitems, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (memory != nullptr) {
+      return memory;
+    }
+  }
+
+  return heap_caps_calloc(nitems, size, MALLOC_CAP_DEFAULT);
+}
 
 // Fungsi callback untuk memasukkan piksel gambar ke Edge Impulse
 static int raw_feature_get_data(size_t offset, size_t length, float *out_ptr) {
@@ -52,26 +77,35 @@ bool minta_dan_baca_frame() {
   // 2. Ketuk pintu: Kirim perintah 'C' (Capture) ke ESP32-CAM
   Serial1.write('C');
 
-  // 3. Tunggu header [0xAA, 0x55] dengan timeout 350ms
-  unsigned long timeout_header = millis() + 350;
+  // 3. Cari header [0xAA, 0x55] dengan timeout yang cukup
+  unsigned long timeout_header = millis() + HEADER_TIMEOUT_MS;
   bool header_ketemu = false;
+  uint8_t byte_sebelumnya = 0;
 
   while (millis() < timeout_header) {
-    if (Serial1.available() >= 2) {
-      if (Serial1.read() == 0xAA) {
-        if (Serial1.read() == 0x55) {
-          header_ketemu = true;
-          break;
-        }
+    while (Serial1.available()) {
+      uint8_t byte_sekarang = (uint8_t)Serial1.read();
+      if (byte_sebelumnya == 0xAA && byte_sekarang == 0x55) {
+        header_ketemu = true;
+        break;
       }
+      byte_sebelumnya = byte_sekarang;
+    }
+
+    if (header_ketemu) {
+      break;
     }
   }
 
-  if (!header_ketemu) return false;
+  if (!header_ketemu) {
+    status_uart = "UART: Header gagal";
+    Serial.println("UART gagal: header tidak diterima");
+    return false;
+  }
 
   // 4. Baca 9216 byte piksel secara utuh
   size_t terbaca = 0;
-  unsigned long timeout_data = millis() + 450;
+  unsigned long timeout_data = millis() + FRAME_TIMEOUT_MS;
   while (terbaca < IMG_SIZE && millis() < timeout_data) {
     int s = Serial1.available();
     if (s > 0) {
@@ -83,13 +117,29 @@ bool minta_dan_baca_frame() {
 
   if (terbaca == IMG_SIZE) {
     paket_sukses_total++;
+    status_uart = "UART: Frame OK";
     return true;
   }
 
+  status_uart = "UART: Frame kurang";
+  Serial.printf("UART gagal: frame %u/%u byte\n",
+                (unsigned int)terbaca, (unsigned int)IMG_SIZE);
   return false;
 }
 
-void update_layar_oled(String prediksi, float akurasi, int progress_persen) {
+void gambar_status_kunci(bool terkunci) {
+  if (terkunci) {
+    display.drawLine(1, 39, 4, 42, WHITE);
+    display.drawLine(4, 42, 10, 35, WHITE);
+  } else {
+    display.drawCircle(6, 39, 5, WHITE);
+    display.drawLine(6, 39, 6, 35, WHITE);
+    display.drawLine(6, 39, 9, 39, WHITE);
+  }
+}
+
+void update_layar_oled(String prediksi, float akurasi, int progress_persen,
+                       bool terkunci) {
   display.clearDisplay();
   
   // Header + Indikator Frame Aktif (Berkedip)
@@ -112,9 +162,10 @@ void update_layar_oled(String prediksi, float akurasi, int progress_persen) {
     display.println(" (Idle)");
   }
 
-  // Bar Progress Menahan Pose
-  display.setCursor(0, 34);
-  display.print("Kunci : [");
+  // Ikon jam menunjukkan pose sedang ditahan, centang menunjukkan huruf tersimpan.
+  gambar_status_kunci(terkunci);
+  display.setCursor(15, 34);
+  display.print("[");
   int bar_len = map(progress_persen, 0, 100, 0, 8);
   for (int i = 0; i < 8; i++) {
     if (i < bar_len) display.print("=");
@@ -132,6 +183,8 @@ void update_layar_oled(String prediksi, float akurasi, int progress_persen) {
 
 void setup() {
   Serial.begin(115200);
+  Serial.printf("PSRAM: %u byte, bebas: %u byte\n",
+                ESP.getPsramSize(), ESP.getFreePsram());
 
   // Penampungan Serial1 diperbesar untuk keamanan buffer
   Serial1.setRxBufferSize(16384);
@@ -175,32 +228,57 @@ void loop() {
         }
       }
 
-      // 4. Logika Ambang Batas (Confidence Threshold) & Penguncian Huruf
+      // 4. Logika Ambang Batas, tahan pose, dan lepas tangan sebelum input berikutnya
       int progress = 0;
       if (best_value >= CONFIDENCE_THRESHOLD) {
-        if (best_label == huruf_terakhir) {
+        waktu_pose_hilang = 0;
+
+        if (menunggu_lepas_tangan) {
+          best_label = huruf_terkunci;
+          progress = 100;
+        } else if (best_label == huruf_terakhir) {
           unsigned long durasi = millis() - waktu_deteksi_mulai;
           progress = min(100, (int)((durasi * 100) / HOLD_TIME_MS));
 
-          // Jika pose ditahan selama 1.2 detik, kunci ke dalam kalimat!
           if (durasi >= HOLD_TIME_MS) {
             kalimat += best_label;
-            waktu_deteksi_mulai = millis(); // Reset
-            progress = 0;
+            huruf_terkunci = best_label;
+            menunggu_lepas_tangan = true;
+            progress = 100;
           }
         } else {
           huruf_terakhir = best_label;
           waktu_deteksi_mulai = millis();
         }
       } else {
-        // Jika tidak ada pose atau akurasi di bawah 55%, anggap Idle
         best_label = "-";
-        huruf_terakhir = "";
-        progress = 0;
+
+        if (menunggu_lepas_tangan) {
+          if (waktu_pose_hilang == 0) {
+            waktu_pose_hilang = millis();
+          } else if (millis() - waktu_pose_hilang >= RELEASE_TIME_MS) {
+            menunggu_lepas_tangan = false;
+            huruf_terakhir = "";
+            huruf_terkunci = "";
+            waktu_deteksi_mulai = 0;
+            waktu_pose_hilang = 0;
+          }
+
+          if (menunggu_lepas_tangan) {
+            best_label = huruf_terkunci;
+            progress = 100;
+          }
+        } else {
+          huruf_terakhir = "";
+          progress = 0;
+        }
       }
 
       // 5. Perbarui tampilan di Layar OLED
-      update_layar_oled(best_label, best_value, progress);
+      update_layar_oled(best_label, best_value, progress, menunggu_lepas_tangan);
+    } else {
+      Serial.printf("AI gagal: run_classifier() mengembalikan %d\n", (int)res);
+      update_layar_oled("ERR", 0.0f, 0, false);
     }
   } else {
     // Jika belum berhasil handshake, tampilkan layar status percobaan
@@ -210,9 +288,9 @@ void loop() {
       display.setCursor(0, 0);
       display.println("--- STATUS ISYARA ---");
       display.setCursor(0, 18);
-      display.println("Menghubungkan Kamera");
+      display.println(status_uart);
       display.setCursor(0, 36);
-      display.print("Handshake (Ketuk)...");
+      display.print("Coba ulang otomatis...");
       display.display();
     }
   }

@@ -88,6 +88,10 @@
 #define DEFINE_SECTION(x) __attribute__((section(x)))
 #endif
 
+#ifndef EI_CLASSIFIER_TFLITE_ARENA_SIZE
+#define EI_CLASSIFIER_TFLITE_ARENA_SIZE EI_CLASSIFIER_TFLITE_LARGEST_ARENA_SIZE
+#endif
+
 /**
  * Setup the TFLite runtime
  *
@@ -111,20 +115,24 @@ static EI_IMPULSE_ERROR inference_tflite_setup(
     *ctx_start_us = ei_read_timer_us();
 
     ei_config_tflite_graph_t *graph_config = (ei_config_tflite_graph_t*)block_config->graph_config;
+    const size_t tensor_arena_size =
+        graph_config->arena_size > EI_CLASSIFIER_TFLITE_ARENA_SIZE
+            ? graph_config->arena_size
+            : EI_CLASSIFIER_TFLITE_ARENA_SIZE;
 
 #ifdef EI_CLASSIFIER_ALLOCATION_STATIC
     // Assign a no-op lambda to the "free" function in case of static arena
 #if defined (EI_TENSOR_ARENA_LOCATION)
-    static uint8_t tensor_arena[EI_CLASSIFIER_TFLITE_LARGEST_ARENA_SIZE] ALIGN(16) DEFINE_SECTION(STRINGIZE_VALUE_OF(EI_TENSOR_ARENA_LOCATION));
+    static uint8_t tensor_arena[EI_CLASSIFIER_TFLITE_ARENA_SIZE] ALIGN(16) DEFINE_SECTION(STRINGIZE_VALUE_OF(EI_TENSOR_ARENA_LOCATION));
 #else
-    static uint8_t tensor_arena[EI_CLASSIFIER_TFLITE_LARGEST_ARENA_SIZE] ALIGN(16);
+    static uint8_t tensor_arena[EI_CLASSIFIER_TFLITE_ARENA_SIZE] ALIGN(16);
 #endif
     p_tensor_arena = ei_unique_ptr_t(tensor_arena, [](void*){});
 #else
     // Create an area of memory to use for input, output, and intermediate arrays.
-    uint8_t *tensor_arena = (uint8_t*)ei_aligned_calloc(16, graph_config->arena_size);
+    uint8_t *tensor_arena = (uint8_t*)ei_aligned_calloc(16, tensor_arena_size);
     if (tensor_arena == NULL) {
-        ei_printf("Failed to allocate TFLite arena (%zu bytes)\n", graph_config->arena_size);
+        ei_printf("Failed to allocate TFLite arena (%zu bytes)\n", tensor_arena_size);
         return EI_IMPULSE_TFLITE_ARENA_ALLOC_FAILED;
     }
     p_tensor_arena = ei_unique_ptr_t(tensor_arena, ei_aligned_free);
@@ -171,12 +179,12 @@ static EI_IMPULSE_ERROR inference_tflite_setup(
     tflite::MicroProfiler *profiler = new tflite::MicroProfiler;
 
     tflite::MicroInterpreter *interpreter = new tflite::MicroInterpreter(
-        model, resolver, tensor_arena, graph_config->arena_size, nullptr, profiler);
+        model, resolver, tensor_arena, tensor_arena_size, nullptr, profiler);
 
     *micro_profiler = (void*)profiler;
 #else
     tflite::MicroInterpreter *interpreter = new tflite::MicroInterpreter(
-        model, resolver, tensor_arena, graph_config->arena_size, nullptr, nullptr);
+        model, resolver, tensor_arena, tensor_arena_size, nullptr, nullptr);
 
     micro_profiler = nullptr;
 #endif
