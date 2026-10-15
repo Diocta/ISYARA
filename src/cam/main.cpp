@@ -100,16 +100,73 @@ static esp_err_t stream_handler(httpd_req_t *req) {
   return res;
 }
 
-// Halaman utama web cermin di layar HP
+// Handler untuk mengambil 1 frame snapshot (berguna untuk pengumpulan dataset)
+static esp_err_t capture_handler(httpd_req_t *req) {
+  camera_fb_t * fb = esp_camera_fb_get();
+  if (!fb) {
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
+  uint8_t * _jpg_buf = NULL;
+  size_t _jpg_buf_len = 0;
+  bool jpeg_converted = frame2jpg(fb, 80, &_jpg_buf, &_jpg_buf_len);
+  esp_camera_fb_return(fb);
+
+  if (!jpeg_converted) {
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
+
+  httpd_resp_set_type(req, "image/jpeg");
+  httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=capture.jpg");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  esp_err_t res = httpd_resp_send(req, (const char *)_jpg_buf, _jpg_buf_len);
+  free(_jpg_buf);
+  return res;
+}
+
+// Halaman utama web cermin di layar HP (dilengkapi tombol capture dataset)
 static esp_err_t index_handler(httpd_req_t *req) {
   const char* html = "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width, initial-scale=1'>"
-                     "<title>ISYARA Mirror</title>"
-                     "<style>body{background:#121212;color:#fff;text-align:center;font-family:sans-serif;margin:0;padding:20px;}"
-                     "img{width:288px;height:288px;image-rendering:pixelated;border:3px solid #00E5FF;border-radius:12px;box-shadow:0 0 20px #00e5ff55;}"
+                     "<title>ISYARA Mirror & Dataset Collector</title>"
+                     "<style>body{background:#121212;color:#fff;text-align:center;font-family:sans-serif;margin:0;padding:15px;}"
+                     "img{width:260px;height:260px;image-rendering:pixelated;border:3px solid #00E5FF;border-radius:12px;box-shadow:0 0 20px #00e5ff55;}"
+                     ".btn{background:#00E5FF;color:#000;font-weight:bold;padding:10px 18px;border:none;border-radius:8px;cursor:pointer;font-size:15px;margin:5px;}"
+                     ".btn:active{transform:scale(0.96);}"
+                     "select{background:#222;color:#fff;border:1px solid #00E5FF;padding:9px;border-radius:8px;font-size:15px;}"
                      "</style></head><body>"
-                     "<h2>ISYARA - Cermin Kamera (96x96)</h2>"
-                     "<p>Gunakan layar ini untuk memposisikan tangan Anda</p>"
-                     "<img src='/stream'>"
+                     "<h2>ISYARA - Cermin & Dataset (96x96)</h2>"
+                     "<p style='color:#bbb;'>Posisikan tangan Anda di dalam kotak cermin</p>"
+                     "<img src='/stream'><br><br>"
+                     "<div>"
+                     "<label>Label: </label>"
+                     "<select id='lbl'>"
+                     "<option value='idle' selected>idle (background/kosong)</option>"
+                     "<option value='A'>Huruf A</option>"
+                     "<option value='B'>Huruf B</option>"
+                     "<option value='C'>Huruf C</option>"
+                     "<option value='D'>Huruf D</option>"
+                     "<option value='E'>Huruf E</option>"
+                     "<option value='F'>Huruf F</option>"
+                     "<option value='G'>Huruf G</option>"
+                     "<option value='H'>Huruf H</option>"
+                     "<option value='I'>Huruf I</option>"
+                     "</select>"
+                     "<button class='btn' onclick='capture()'>📸 Ambil Foto Dataset</button>"
+                     "</div>"
+                     "<p id='stat' style='color:#00E5FF;margin-top:10px;'></p>"
+                     "<script>"
+                     "let count = 0;"
+                     "function capture(){"
+                     "  const label = document.getElementById('lbl').value;"
+                     "  const a = document.createElement('a');"
+                     "  a.href = '/capture?t=' + Date.now();"
+                     "  a.download = label + '_' + Date.now() + '.jpg';"
+                     "  a.click();"
+                     "  count++;"
+                     "  document.getElementById('stat').innerText = 'Foto ke-' + count + ' berhasil didownload untuk label: ' + label;"
+                     "}"
+                     "</script>"
                      "</body></html>";
   return httpd_resp_send(req, html, HTTPD_RESP_USE_STRLEN);
 }
@@ -130,10 +187,17 @@ void startCameraServer() {
     .handler   = stream_handler,
     .user_ctx  = NULL
   };
+  httpd_uri_t capture_uri = {
+    .uri       = "/capture",
+    .method    = HTTP_GET,
+    .handler   = capture_handler,
+    .user_ctx  = NULL
+  };
 
   if (httpd_start(&stream_httpd, &config) == ESP_OK) {
     httpd_register_uri_handler(stream_httpd, &index_uri);
     httpd_register_uri_handler(stream_httpd, &stream_uri);
+    httpd_register_uri_handler(stream_httpd, &capture_uri);
   }
 }
 
@@ -158,8 +222,8 @@ void setup() {
   config.pin_pclk = PCLK_GPIO_NUM;
   config.pin_vsync = VSYNC_GPIO_NUM;
   config.pin_href = HREF_GPIO_NUM;
-  config.pin_sscb_sda = SIOD_GPIO_NUM;
-  config.pin_sscb_scl = SIOC_GPIO_NUM;
+  config.pin_sccb_sda = SIOD_GPIO_NUM;
+  config.pin_sccb_scl = SIOC_GPIO_NUM;
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
@@ -177,7 +241,14 @@ void setup() {
   sensor_t * s = esp_camera_sensor_get();
   if (s != NULL) {
     s->set_vflip(s, 1);
-    s->set_brightness(s, 1);
+    s->set_hmirror(s, 0);       // 0: Normal (sesuai arah tangan asli)
+    s->set_brightness(s, 1);    // Kecerahan optimal (+1)
+    s->set_contrast(s, 2);      // Naikkan kontras (+2) agar siluet kontur jari tegas
+    s->set_sharpness(s, 2);     // Pertajam garis tepi jari (+2)
+    s->set_whitebal(s, 1);      // Auto White Balance aktif
+    s->set_awb_gain(s, 1);      // AWB Gain aktif
+    s->set_exposure_ctrl(s, 1); // Auto Exposure Control aktif
+    s->set_gainceiling(s, (gainceiling_t)2); // Batasi gain agar tidak muncul bintik noise
     s->set_framesize(s, FRAMESIZE_96X96);
   }
 

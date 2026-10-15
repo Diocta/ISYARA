@@ -43,10 +43,29 @@ Dokumen ini berfungsi sebagai rekam jejak (changelog) dan dokumentasi berkelanju
   - Menulis kode produksi untuk `src/cam/main.cpp`: Menangkap citra 96x96 Grayscale (OV3660), menyiarkan cermin langsung ke browser via HTTP MJPEG, serta mentransmisikan 9216 bytes piksel secara simultan ke ESP32-S3 via UART berkecepatan tinggi (921600 baud).
   - Menulis kode produksi untuk `src/s3/main.cpp`: Membaca 9216 bytes piksel UART, menjalankan inferensi AI Edge Impulse `run_classifier()`, menerapkan logika *hold-to-type* (1.2 detik), dan menampilkan hasil prediksi serta kalimat yang tersusun ke layar OLED SSD1306.
   - **Kompilasi Sukses 100%:** Kedua environment (`esp32s3` dan `esp32cam`) berhasil di-*build* tanpa error sama sekali.
-  - **[UPDATE - HANDSHAKE & THRESHOLD]**: 
-    - Menerapkan arsitektur protokol **Handshake (Ketuk Pintu)**: ESP32-S3 meminta 1 frame secara eksplisit menggunakan perintah `'C'` hanya ketika siap menjalankan inferensi. Ini menyelesaikan masalah buffer macet dan mengembalikan kelancaran web streaming di HP ke FPS maksimal.
-    - Menambahkan ambang batas **Confidence Threshold (55%)**: Jika tidak ada pose tangan atau akurasi di bawah 55%, sistem masuk ke mode `Idle (-)` dan tidak akan mengetik huruf salah ke dalam kalimat.
-    - Kedua firmware berhasil dikompilasi 100% sukses.
+- **[13 Oktober 2026]**:
+  - **Peningkatan Firmware ESP32-CAM (`src/cam/main.cpp`):**
+    - Mengoptimasi tuning sensor OV3660: Kontras (+2), Ketajaman (+2), Kecerahan (+1), Auto White Balance, dan pembatasan `gainceiling` untuk menghilangkan noise bintik semut pada citra 96x96 Grayscale.
+    - Menambahkan endpoint HTTP `/capture` dan tombol interaktif *"Ambil Foto Dataset"* di web browser HP untuk mempermudah pengambilan data sampel langsung dari lensa kamera asli.
+  - **Peningkatan Firmware ESP32-S3 (`src/s3/main.cpp`):**
+    - Menerapkan peredam jitter **Majority Voting (Sliding Window 5 Frame)**: AI mensyaratkan konsensus minimal 3/5 frame agar tidak mudah reset ketika ada 1 frame noise.
+    - Menambahkan filter **Confidence Gap Margin (12%)**: Selisih probabilitas peringkat 1 dan peringkat 2 harus >= 12% untuk mengabaikan tebakan ambigu.
+    - Menerapkan proteksi **Anti-Repeat Hold-to-Type**: Mencegah pengetikan huruf berulang kali saat pose masih ditahan.
+    - Menambahkan penanganan otomatis untuk kelas negatif (`idle` / `background`).
+    - Desain ulang tampilan OLED SSD1306 agar lebih informatif (Status Kunci, Akurasi %, dan Auto-scroll kalimat).
+  - **Peralatan Otomasi Dataset & Augmentasi (`tools/`):**
+    - Membuat `tools/generate_idle_dataset.py` & `tools/augment_dataset.py`: Telah menghasilkan **480 gambar** variasi latar belakang untuk kelas `idle` di folder `dataset/idle/` yang siap diunggah ke Edge Impulse.
+    - Membuat `tools/dataset_collector.py` untuk mengoleksi foto pose tangan langsung dari stream ESP32-CAM ke PC via burst shot.
+  - **Status Build:** Kedua firmware (`esp32s3` dan `esp32cam`) berhasil dikompilasi 100% sukses.
+- **[15 Oktober 2026]**:
+  - **Implementasi Keyboard Braille 4x4 Tactile Matrix (`src/s3/braille_keypad.h` & `src/s3/main.cpp`):**
+    - Mengintegrasikan modul push button 4x4 (16 tombol taktil S1-S16) ke ESP32-S3 menggunakan 8 pin GPIO aman (Rows: GPIO 4, 5, 6, 7 | Cols: GPIO 10, 11, 12, 13).
+    - Memetakan 6 tombol tengah (`S2, S3, S6, S7, S10, S11`) menjadi bentuk fisik **2x3 Braille Cell (Titik 1 sampai 6)** yang ergonomis dan intuitif.
+    - Menerapkan tombol kontrol fungsional: `S1` (Mode Switch AI BISINDO <-> Braille), `S4` (Clear All), `S5/S13` (Backspace), `S8/S15` (Enter/Commit), `S9/S14` (Spasi), `S12` (Toggle Angka/Huruf), dan `S16` (TTS / Baca Suara).
+    - Menulis dekoder standar Grade 1 Braille (A-Z, Angka 0-9, dan Tanda Baca) berbasis 6-bit binary mask.
+    - Menambahkan visualizer interaktif pada Layar OLED SSD1306 (preview 6 titik Braille lingkaran berongga/padat, huruf aktif, dan auto-scroll kalimat).
+    - Menerapkan fitur *Auto-Commit Timeout* (850ms) dan proteksi *anti-ghosting* matrix.
+    - **Status Build:** Firmware `esp32s3` berhasil dikompilasi 100% sukses (Flash 26.8%, RAM 11.9%).
 
 - **[13 Oktober 2026 - UART HANDSHAKE DIAGNOSTIK]**:
   - Daya ESP32-CAM berhasil dipastikan menggunakan pin 5V yang benar dari expansion board dengan adaptor eksternal 12V pada input expansion. ESP32-CAM dapat menyala, terhubung Wi-Fi, dan menyediakan web stream.
