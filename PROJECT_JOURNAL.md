@@ -188,8 +188,13 @@ Dokumen ini berfungsi sebagai rekam jejak (changelog) dan dokumentasi berkelanju
     - Menambahkan fungsi **`tampilkan_standby_tft()`** yang langsung dipanggil di dalam `setup()`. Begitu perangkat dinyalakan, layar TFT seketika berubah dari putih menjadi latar hitam pekat dengan judul cyan "ISYARA", subtitle kuning, status koneksi kamera, dan petunjuk navigasi hijau `[S1] Beralih ke Braille`.
     - Menyelaraskan transisi layar: saat beralih dari Mode Braille kembali ke Mode AI BISINDO, `tampilkan_standby_tft()` otomatis dipanggil untuk menyegarkan tampilan.
     - Meningkatkan *timeout* pencarian header UART menjadi 300 ms dengan tetap mempertahankan polling keypad instan di dalamnya.
+    - **Perbaikan Krusial Hardware SS Lock (Penyebab Utama TFT Tetap Putih):**
+      - Pada ESP32-S3, fungsi `SPIClass::begin(sck, miso, mosi, ss)` jika dioper parameter `ss = TFT_CS (10)` akan otomatis menghubungkan pin GPIO 10 ke periferal hardware SPI SS (`pinMatrixOutAttach`).
+      - Padahal library `Adafruit_SPITFT` mengendalikan pin CS secara manual (*software GPIO*) menggunakan `digitalWrite(_cs, LOW)` dan `digitalWrite(_cs, HIGH)`.
+      - Karena GPIO 10 terkunci ke periferal SPI, fungsi `digitalWrite(_cs, LOW)` tidak mampu menarik pin CS ke LOW (pin tertahan HIGH terus-menerus). Akibatnya, chip ST7735 mengabaikan seluruh transmisi data SPI dan layar tetap putih polos.
+      - **Solusi:** Menggunakan objek SPI global `&SPI`, membebaskan pin CS dengan mengoper `ss = -1` pada `SPI.begin(TFT_SCK, -1, TFT_MOSI, -1)`, menetapkan pin CS, DC, RST sebagai OUTPUT manual, menurunkan kecepatan SPI ke **16 MHz** (standar aman ST7735), serta menambahkan tes kilatan layar biru (*blue flash test*) 80ms saat *booting* untuk konfirmasi visual penerimaan data SPI.
   - **Status Kompilasi Final (Build Verification):**
-    - Environment `esp32s3`: **SUCCESS** (Flash: 16.1%, RAM: 19.5%).
+    - Environment `esp32s3`: **SUCCESS** (Flash: 16.1%, RAM: 19.4%).
     - Environment `esp32cam`: **SUCCESS** (Flash: 11.1%, RAM: 8.0%).
 
 

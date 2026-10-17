@@ -44,8 +44,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 #define TFT_PREVIEW_SIZE 128
 #define TFT_PREVIEW_X    16
-SPIClass tft_spi(FSPI);
-Adafruit_ST7735 tft(&tft_spi, TFT_CS, TFT_DC, TFT_RST);
+Adafruit_ST7735 tft(&SPI, TFT_CS, TFT_DC, TFT_RST);
 bool tft_siap = false;
 uint16_t tft_buffer[TFT_PREVIEW_SIZE * TFT_PREVIEW_SIZE];
 
@@ -302,18 +301,33 @@ void setup() {
   }
 
   // 3. Inisialisasi Layar LCD TFT 1.77" ST7735S (SPI FSPI)
+  // Konfigurasi pin CS, DC, RST sebagai OUTPUT manual
+  pinMode(TFT_CS, OUTPUT);
+  digitalWrite(TFT_CS, HIGH);
+  pinMode(TFT_DC, OUTPUT);
+  digitalWrite(TFT_DC, HIGH);
   pinMode(TFT_RST, OUTPUT);
   digitalWrite(TFT_RST, HIGH);
+
+  // Pulsa Hardware Reset (Low aktif) ke ST7735S
   delay(10);
   digitalWrite(TFT_RST, LOW);
-  delay(10);
-  digitalWrite(TFT_RST, HIGH);
   delay(20);
+  digitalWrite(TFT_RST, HIGH);
+  delay(50);
 
-  tft_spi.begin(TFT_SCK, -1, TFT_MOSI, TFT_CS);
+  // Inisialisasi SPI Hardware pada SCK=12, MOSI=11, SS=-1 (agar CS tidak terkunci periferal)
+  SPI.begin(TFT_SCK, -1, TFT_MOSI, -1);
+
+  // Inisialisasi kontroler ST7735S (128x160 Blacktab)
   tft.initR(INITR_BLACKTAB);
-  tft.setSPISpeed(20000000);
+  tft.setSPISpeed(16000000); // 16 MHz stabil untuk ST7735S
   tft.setRotation(1);
+
+  // Flash test: Tampilkan biru 80ms untuk verifikasi visual bahwa sinyal SPI diterima
+  tft.fillScreen(ST77XX_BLUE);
+  delay(80);
+  tft.fillScreen(ST77XX_BLACK);
   tft_siap = true;
   tampilkan_standby_tft();
   Serial.println("[TFT] ST7735S SPI Siap (CS:10, MOSI:11, SCK:12, DC:14, RST:15)");
