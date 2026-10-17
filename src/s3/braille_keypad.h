@@ -7,41 +7,37 @@
 #include "audio_manager.h"
 
 // =============================================================================
-// ISYARA - Modul Keyboard Braille 4x4 Tactile Matrix (ESP32-S3)
-// Menggunakan FreeRTOS Task pada Core 0 (Independent Scanner)
+// ISYARA - Universal 8-Pin All-Pairs Keypad Scanner (ESP32-S3 Core 0 FreeRTOS)
+// Mampu mendeteksi penekanan tombol APAPUN terlepas dari orientasi modul PCB
+// (Bisa untuk Row/Col lurus, terbalik, tertukar, maupun interleaved)
 // =============================================================================
 
-// Pinout Rows (Header Kiri: Pin 4, 5, 6, 7 berurutan)
-#define KEYPAD_R1 4
-#define KEYPAD_R2 5
-#define KEYPAD_R3 6
-#define KEYPAD_R4 7
+// 8 Pin Jumper ESP32-S3 yang terhubung ke Pin 1 s.d 8 modul 4x4 (dari atas ke bawah)
+// Pin 1 = GPIO 4
+// Pin 2 = GPIO 5
+// Pin 3 = GPIO 6
+// Pin 4 = GPIO 7
+// Pin 5 = GPIO 13
+// Pin 6 = GPIO 16
+// Pin 7 = GPIO 21
+// Pin 8 = GPIO 47
+const uint8_t KEYPAD_PINS[8] = {4, 5, 6, 7, 13, 16, 21, 47};
 
-// Pinout Cols (Bebas tabrakan dari TFT & strapping pins)
-#define KEYPAD_C1 13
-#define KEYPAD_C2 16
-#define KEYPAD_C3 21
-#define KEYPAD_C4 47
-
-const uint8_t ROW_PINS[4] = {KEYPAD_R1, KEYPAD_R2, KEYPAD_R3, KEYPAD_R4};
-const uint8_t COL_PINS[4] = {KEYPAD_C1, KEYPAD_C2, KEYPAD_C3, KEYPAD_C4};
-
-// Indeks ID Tombol S1 - S16 (1..16)
-// S1  = (R0, C0) | S2  = (R0, C1) | S3  = (R0, C2) | S4  = (R0, C3)
-// S5  = (R1, C0) | S6  = (R1, C1) | S7  = (R1, C2) | S8  = (R1, C3)
-// S9  = (R2, C0) | S10 = (R2, C1) | S11 = (R2, C2) | S12 = (R2, C3)
-// S13 = (R3, C0) | S14 = (R3, C1) | S15 = (R3, C2) | S16 = (R3, C3)
-
-// State Tombol Matriks (Debounce)
-static bool key_state[4][4] = {false};
-static bool key_prev_state[4][4] = {false};
+// State Debounce untuk semua pasangan pin (8 x 8)
+static bool pair_prev_state[8][8] = {false};
 static unsigned long last_key_press_time = 0;
-const unsigned long DEBOUNCE_MS = 25;
+const unsigned long DEBOUNCE_MS = 30;
+
+// Variabel Diagnostik untuk Layar OLED & Serial Monitor
+extern volatile int last_detected_pin_a;
+extern volatile int last_detected_pin_b;
+extern volatile char last_detected_label[16];
+extern volatile unsigned long last_detected_time;
 
 // Buffer Titik Braille (6-dot cell)
-// Bit 0: Titik 1 (S2)  | Bit 3: Titik 4 (S3)
-// Bit 1: Titik 2 (S6)  | Bit 4: Titik 5 (S7)
-// Bit 2: Titik 3 (S10) | Bit 5: Titik 6 (S11)
+// Bit 0: Titik 1 | Bit 3: Titik 4
+// Bit 1: Titik 2 | Bit 4: Titik 5
+// Bit 2: Titik 3 | Bit 5: Titik 6
 static volatile uint8_t braille_dots = 0;
 static volatile bool number_mode = false;
 static volatile unsigned long last_dot_time = 0;
@@ -89,15 +85,14 @@ char decode_braille_to_char(uint8_t mask, bool is_num) {
     case 0b110101: ch = 'Z'; break; // Titik 1, 3, 5, 6
     
     // Tanda Baca
-    case 0b000010: ch = ','; break; // Titik 2
-    case 0b110010: ch = '.'; break; // Titik 2, 5, 6
-    case 0b100110: ch = '?'; break; // Titik 2, 3, 6
-    case 0b010110: ch = '!'; break; // Titik 2, 3, 5
-    case 0b100100: ch = '-'; break; // Titik 3, 6
+    case 0b000010: ch = ','; break;
+    case 0b110010: ch = '.'; break;
+    case 0b100110: ch = '?'; break;
+    case 0b010110: ch = '!'; break;
+    case 0b100100: ch = '-'; break;
     default: ch = '?'; break;
   }
 
-  // Jika sedang dalam Mode Angka (1..9, 0)
   if (is_num && ch >= 'A' && ch <= 'J') {
     if (ch == 'J') return '0';
     return (char)('1' + (ch - 'A'));
@@ -106,7 +101,7 @@ char decode_braille_to_char(uint8_t mask, bool is_num) {
   return ch;
 }
 
-// Fungsi Commit Karakter Braille ke Kalimat
+// Commit karakter Braille ke baris teks
 void commit_braille_char() {
   if (braille_dots != 0) {
     char c = decode_braille_to_char(braille_dots, number_mode);
@@ -121,138 +116,170 @@ void commit_braille_char() {
   }
 }
 
-// Handler Aksi Setiap Tombol S1 - S16
-void handle_key_action(int key_num) {
-  Serial.printf("[KEYPAD] Tombol S%d Ditekan! ", key_num);
-
-  switch (key_num) {
-    // Tombol S1: Ganti Mode Sistem (BISINDO AI <-> BRAILLE KEYBOARD)
-    case 1:
-      if (current_device_mode == MODE_AI_BISINDO) {
-        current_device_mode = MODE_BRAILLE;
-        Serial.println("-> MODE SWITCH: BRAILLE KEYBOARD AKTIF");
-        audio.playModeChange(true);
-      } else {
-        current_device_mode = MODE_AI_BISINDO;
-        Serial.println("-> MODE SWITCH: AI BISINDO AKTIF");
-        audio.playModeChange(false);
-      }
-      break;
-
-    // Titik-titik Braille (2x3 Cell Grid di S2, S3, S6, S7, S10, S11)
-    case 2:  // Titik 1 (Kiri Atas)
-      braille_dots ^= (1 << 0);
-      last_dot_time = millis();
-      Serial.println("-> Titik 1 Ditekan");
-      break;
-
-    case 3:  // Titik 4 (Kanan Atas)
-      braille_dots ^= (1 << 3);
-      last_dot_time = millis();
-      Serial.println("-> Titik 4 Ditekan");
-      break;
-
-    case 4:  // S4: Clear All (Hapus Seluruh Kalimat)
-      kalimat = "";
-      braille_dots = 0;
-      Serial.println("-> HAPUS SELURUH TEKS (Clear All)");
-      audio.playClear();
-      break;
-
-    case 5:  // S5: Backspace (Hapus 1 Karakter Terakhir)
-    case 13: // S13: Alternatif Backspace
-      if (braille_dots != 0) {
-        braille_dots = 0;
-        Serial.println("-> Batalkan Titik Aktif");
-      } else if (kalimat.length() > 0) {
-        kalimat.remove(kalimat.length() - 1);
-        Serial.printf("-> Backspace: %s\n", kalimat.c_str());
-        audio.playBackspace();
-      }
-      break;
-
-    case 6:  // Titik 2 (Kiri Tengah)
-      braille_dots ^= (1 << 1);
-      last_dot_time = millis();
-      Serial.println("-> Titik 2 Ditekan");
-      break;
-
-    case 7:  // Titik 5 (Kanan Tengah)
-      braille_dots ^= (1 << 4);
-      last_dot_time = millis();
-      Serial.println("-> Titik 5 Ditekan");
-      break;
-
-    case 8:  // S8: Enter / Kunci Huruf Sekarang
-    case 15: // S15: Alternatif Enter
-      commit_braille_char();
-      Serial.println("-> Enter / Commit Huruf");
-      break;
-
-    case 9:  // S9: Spasi
-    case 14: // S14: Alternatif Spasi (Jempol Bawah)
-      commit_braille_char();
-      kalimat += " ";
-      Serial.printf("-> Tambah Spasi -> Kalimat: '%s'\n", kalimat.c_str());
-      audio.playChar(' ');
-      break;
-
-    case 10: // Titik 3 (Kiri Bawah)
-      braille_dots ^= (1 << 2);
-      last_dot_time = millis();
-      Serial.println("-> Titik 3 Ditekan");
-      break;
-
-    case 11: // Titik 6 (Kanan Bawah)
-      braille_dots ^= (1 << 5);
-      last_dot_time = millis();
-      Serial.println("-> Titik 6 Ditekan");
-      break;
-
-    case 12: // S12: Mode Angka / Huruf
-      number_mode = !number_mode;
-      Serial.printf("-> Mode Angka: %s\n", number_mode ? "AKTIF" : "NONAKTIF");
-      break;
-
-    case 16: // S16: Tombol TTS / Suara
-      Serial.printf("-> SUARA / BACA TEKS: '%s'\n", kalimat.c_str());
-      audio.readSentence(kalimat);
-      break;
-
-    default:
-      Serial.println();
-      break;
+// Aksi Logika Fungsional Tombol
+void toggle_system_mode() {
+  if (current_device_mode == MODE_AI_BISINDO) {
+    current_device_mode = MODE_BRAILLE;
+    Serial.println("-> [MODE SWITCH]: BRAILLE KEYBOARD AKTIF");
+    audio.playModeChange(true);
+  } else {
+    current_device_mode = MODE_AI_BISINDO;
+    Serial.println("-> [MODE SWITCH]: AI BISINDO AKTIF");
+    audio.playModeChange(false);
   }
 }
 
-// Fungsi Update Matrix Scanner (Dipanggil di task Core 0 atau loop)
+void toggle_dot(uint8_t dot_index) { // 0: Dot 1, 1: Dot 2, 2: Dot 3, 3: Dot 4, 4: Dot 5, 5: Dot 6
+  braille_dots ^= (1 << dot_index);
+  last_dot_time = millis();
+  Serial.printf("-> Titik %d Di-toggle! (Mask: 0x%02X)\n", dot_index + 1, braille_dots);
+}
+
+// Handler Pemetaan Pasangan Pin (pin_a dan pin_b dalam indeks 0..7)
+void handle_pin_pair_press(int a, int b) {
+  if (a > b) { int tmp = a; a = b; b = tmp; } // Selalu a < b
+  int pA = a + 1; // Pin Header 1 s.d 8
+  int pB = b + 1;
+
+  last_detected_pin_a = pA;
+  last_detected_pin_b = pB;
+  last_detected_time  = millis();
+
+  Serial.printf("\n[KEYPAD-HIT] >>> Pin %d (GPIO %d) & Pin %d (GPIO %d) Terhubung! <<<\n",
+                pA, KEYPAD_PINS[a], pB, KEYPAD_PINS[b]);
+
+  // =========================================================================
+  // PEMETAAN JALUR PCB MODUL (Berdasarkan Hasil Tes Fisik Aktual Pengguna)
+  // =========================================================================
+  // Dari hasil tes fisik:
+  // - S4 (Pojok Kanan Atas) menghubungkan Pin 1 & Pin 5
+  // - S5 (Kiri Baris 2) menghubungkan Pin 1 & Pin 6
+  // - S7 (Tengah Baris 2) menghubungkan Pin 2 & Pin 6
+  // - S8 (Kanan Baris 2) menghubungkan Pin 3 & Pin 6
+  // =========================================================================
+
+  // Mode Switch (S1 atau S4):
+  if ((pA == 1 && pB == 5) || (pA == 1 && pB == 8) || (pA == 4 && pB == 5)) {
+    snprintf((char*)last_detected_label, 16, "MODE SWITCH");
+    toggle_system_mode();
+    return;
+  }
+
+  // --- TITIK-TITIK BRAILLE ---
+  // Titik 1 (Kiri Atas): S2 fisik
+  if ((pA == 1 && pB == 6) || (pA == 2 && pB == 5)) {
+    snprintf((char*)last_detected_label, 16, "DOT 1");
+    toggle_dot(0);
+    return;
+  }
+
+  // Titik 2 (Kiri Tengah): S6 fisik
+  if ((pA == 2 && pB == 6) || (pA == 2 && pB == 7)) {
+    snprintf((char*)last_detected_label, 16, "DOT 2");
+    toggle_dot(1);
+    return;
+  }
+
+  // Titik 3 (Kiri Bawah): S10 fisik
+  if ((pA == 3 && pB == 6) || (pA == 3 && pB == 7)) {
+    snprintf((char*)last_detected_label, 16, "DOT 3");
+    toggle_dot(2);
+    return;
+  }
+
+  // Titik 4 (Kanan Atas): S3 fisik
+  if ((pA == 1 && pB == 7) || (pA == 3 && pB == 5)) {
+    snprintf((char*)last_detected_label, 16, "DOT 4");
+    toggle_dot(3);
+    return;
+  }
+
+  // Titik 5 (Kanan Tengah): S7 fisik
+  if ((pA == 2 && pB == 7) || (pA == 2 && pB == 8)) {
+    snprintf((char*)last_detected_label, 16, "DOT 5");
+    toggle_dot(4);
+    return;
+  }
+
+  // Titik 6 (Kanan Bawah): S11 fisik
+  if ((pA == 3 && pB == 7) || (pA == 3 && pB == 8)) {
+    snprintf((char*)last_detected_label, 16, "DOT 6");
+    toggle_dot(5);
+    return;
+  }
+
+  // Spasi: S9 atau S14
+  if ((pA == 4 && pB == 6) || (pA == 4 && pB == 7)) {
+    snprintf((char*)last_detected_label, 16, "SPASI");
+    commit_braille_char();
+    kalimat += " ";
+    audio.playChar(' ');
+    Serial.printf("-> Tambah Spasi -> Kalimat: '%s'\n", kalimat.c_str());
+    return;
+  }
+
+  // Backspace: S5 atau S13
+  if ((pA == 4 && pB == 5) || (pA == 4 && pB == 8)) {
+    snprintf((char*)last_detected_label, 16, "BACKSPACE");
+    if (braille_dots != 0) {
+      braille_dots = 0;
+      Serial.println("-> Batalkan Titik Aktif");
+    } else if (kalimat.length() > 0) {
+      kalimat.remove(kalimat.length() - 1);
+      audio.playBackspace();
+      Serial.printf("-> Backspace -> Kalimat: '%s'\n", kalimat.c_str());
+    }
+    return;
+  }
+
+  // Hapus Semua (Clear All)
+  if (pA == 1 && pB == 8) {
+    snprintf((char*)last_detected_label, 16, "CLEAR ALL");
+    kalimat = "";
+    braille_dots = 0;
+    audio.playClear();
+    Serial.println("-> Hapus Seluruh Kalimat");
+    return;
+  }
+
+  // Enter / Commit Manual: S8 atau S15
+  if ((pA == 3 && pB == 6) || (pA == 4 && pB == 7)) {
+    snprintf((char*)last_detected_label, 16, "ENTER");
+    commit_braille_char();
+    Serial.println("-> Enter / Commit");
+    return;
+  }
+
+  // Tombol belum terpetakan khusus: Catat labelnya
+  snprintf((char*)last_detected_label, 16, "P%d-P%d", pA, pB);
+  Serial.printf("-> Tombol Baru Terdeteksi (Pair P%d & P%d)\n", pA, pB);
+}
+
+// Fungsi Scanner Matriks All-Pairs (Memeriksa seluruh kemungkinan pasangan pin)
 void braille_keypad_update() {
   unsigned long now = millis();
 
-  // Scan Matriks 4x4
-  for (int c = 0; c < 4; c++) {
-    digitalWrite(COL_PINS[c], LOW);
-    pinMode(COL_PINS[c], OUTPUT);
-    delayMicroseconds(35); // Beri jeda cukup agar kapasitansi jalur stabil
+  // Scan Simetris: Drive satu pin LOW, baca pin lainnya yang diberi INPUT_PULLUP
+  for (int i = 0; i < 8; i++) {
+    // Siapkan pin i sebagai OUTPUT LOW
+    pinMode(KEYPAD_PINS[i], OUTPUT);
+    digitalWrite(KEYPAD_PINS[i], LOW);
+    delayMicroseconds(35); // Settling time
 
-    for (int r = 0; r < 4; r++) {
-      bool is_pressed = (digitalRead(ROW_PINS[r]) == LOW);
+    for (int j = i + 1; j < 8; j++) {
+      bool is_pressed = (digitalRead(KEYPAD_PINS[j]) == LOW);
 
-      // Deteksi Event Edge: Tombol baru saja ditekan
-      if (is_pressed && !key_prev_state[r][c] && (now - last_key_press_time > DEBOUNCE_MS)) {
+      if (is_pressed && !pair_prev_state[i][j] && (now - last_key_press_time > DEBOUNCE_MS)) {
         last_key_press_time = now;
-        key_state[r][c] = true;
-        int key_num = (r * 4) + c + 1; // S1 sampai S16
-        Serial.printf("[KEYPAD-RAW] Ditekan: Row%d (GPIO%d) & Col%d (GPIO%d) => S%d\n",
-                      r + 1, ROW_PINS[r], c + 1, COL_PINS[c], key_num);
-        handle_key_action(key_num);
-      } else if (!is_pressed && key_prev_state[r][c]) {
-        key_state[r][c] = false;
+        pair_prev_state[i][j] = true;
+        handle_pin_pair_press(i, j);
+      } else if (!is_pressed && pair_prev_state[i][j]) {
+        pair_prev_state[i][j] = false;
       }
-      key_prev_state[r][c] = is_pressed;
     }
 
-    pinMode(COL_PINS[c], INPUT); // Lepas kembali kolom ke High-Z
+    // Kembalikan pin i ke INPUT_PULLUP
+    pinMode(KEYPAD_PINS[i], INPUT_PULLUP);
   }
 
   // Auto-commit huruf braille setelah tidak ada tombol ditekan selama AUTO_COMMIT_MS
@@ -261,24 +288,20 @@ void braille_keypad_update() {
   }
 }
 
-// Task FreeRTOS Independen pada Core 0 (Scan Keypad 100x per detik)
+// Background Task FreeRTOS pada Core 0 (Scan 100x per detik)
 static void keypad_freertos_task(void *pvParameters) {
   while (true) {
     braille_keypad_update();
-    vTaskDelay(pdMS_TO_TICKS(10)); // Jeda 10ms
+    vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
 
-// Inisialisasi Pin Keypad 4x4 & Jalankan Scanner di Core 0
+// Inisialisasi 8 Pin Keypad
 void braille_keypad_init() {
-  for (int r = 0; r < 4; r++) {
-    pinMode(ROW_PINS[r], INPUT_PULLUP);
-  }
-  for (int c = 0; c < 4; c++) {
-    pinMode(COL_PINS[c], INPUT);
+  for (int i = 0; i < 8; i++) {
+    pinMode(KEYPAD_PINS[i], INPUT_PULLUP);
   }
 
-  // Jalankan background task di Core 0 (agar tak terhalang inferensi AI di Core 1)
   xTaskCreatePinnedToCore(
     keypad_freertos_task,
     "KeypadScanner",
@@ -289,7 +312,7 @@ void braille_keypad_init() {
     0 // Core 0
   );
 
-  Serial.println("[BRAILLE] Keypad 4x4 Diinisialisasi di Core 0 (R: 4,5,6,7 | C: 13,16,21,47)");
+  Serial.println("[BRAILLE] Universal All-Pairs Keypad Scanner Aktif di Core 0!");
 }
 
 // Tampilan Visual Braille Khusus Layar OLED
@@ -303,6 +326,12 @@ void render_braille_oled(Adafruit_SSD1306 &display) {
   display.print("BRAILLE MODE ");
   if (number_mode) display.print("[NUM]");
   else display.print("[A-Z]");
+
+  // Tampilkan notifikasi tombol fisik jika baru ditekan (< 1.5 detik)
+  if (millis() - last_detected_time < 1500 && last_detected_pin_a > 0) {
+    display.setCursor(76, 0);
+    display.printf("[%s]", (char*)last_detected_label);
+  }
 
   // 2. Visualisasi 6 Titik Braille (2x3 Grid) di Sisi Kiri Layar
   int dot_coords[6][2] = {

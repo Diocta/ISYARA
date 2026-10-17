@@ -25,6 +25,12 @@ AudioManager audio;
 // ─── Mode Sistem (Toggle via Tombol S1 pada Keypad) ──────────────────────────
 volatile DeviceMode current_device_mode = MODE_AI_BISINDO;
 
+// ─── Diagnostik Tombol Fisik untuk Layar OLED ────────────────────────────────
+volatile int last_detected_pin_a = 0;
+volatile int last_detected_pin_b = 0;
+volatile char last_detected_label[16] = "";
+volatile unsigned long last_detected_time = 0;
+
 // ─── Layar OLED 0.96" SSD1306 (I2C) ──────────────────────────────────────────
 #define I2C_SDA 8
 #define I2C_SCL 9
@@ -226,6 +232,12 @@ void update_layar_oled(String prediksi, float akurasi, int progress_persen,
     display.print(i < bar_len ? "=" : " ");
   }
   display.print("]");
+
+  // Feedback Tombol Fisik Real-Time pada OLED
+  if (millis() - last_detected_time < 1500 && last_detected_pin_a > 0) {
+    display.setCursor(76, 34);
+    display.printf("%s", (char*)last_detected_label);
+  }
 
   // Baris 4: Auto-scroll teks kalimat (AI BISINDO + Braille bersatu)
   display.setCursor(0, 52);
