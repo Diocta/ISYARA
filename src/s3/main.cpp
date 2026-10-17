@@ -23,13 +23,8 @@
 AudioManager audio;
 
 // ─── Mode Sistem (Toggle via Tombol S1 pada Keypad) ──────────────────────────
-volatile DeviceMode current_device_mode = MODE_AI_BISINDO;
-
-// ─── Diagnostik Tombol Fisik untuk Layar OLED ────────────────────────────────
-volatile int last_detected_pin_a = 0;
-volatile int last_detected_pin_b = 0;
-volatile char last_detected_label[16] = "";
-volatile unsigned long last_detected_time = 0;
+DeviceMode current_device_mode = MODE_AI_BISINDO;
+bool tft_butuh_update_mode = true;
 
 // ─── Layar OLED 0.96" SSD1306 (I2C) ──────────────────────────────────────────
 #define I2C_SDA 8
@@ -109,13 +104,13 @@ bool minta_dan_baca_frame() {
   while (Serial1.available()) Serial1.read(); // Bersihkan buffer sisa
   Serial1.write('C');                         // Kirim trigger capture
 
-  // Cari pasangan byte header [0xAA, 0x55] (60ms cukup pada baudrate 460800)
-  unsigned long timeout_header = millis() + 60;
+  // Cari pasangan byte header [0xAA, 0x55] (snappy 80ms timeout)
+  unsigned long timeout_header = millis() + 80;
   bool    header_ketemu   = false;
   uint8_t byte_sebelumnya = 0;
 
   while (millis() < timeout_header) {
-    braille_keypad_update(); // Pastikan tombol S1-S16 selalu terbaca responsif
+    braille_keypad_update(); // Pastikan tombol S1 selalu terbaca instan
     if (current_device_mode == MODE_BRAILLE) return false;
 
     while (Serial1.available()) {
@@ -171,6 +166,29 @@ void tampilkan_preview_tft() {
     }
   }
   tft.drawRGBBitmap(TFT_PREVIEW_X, 0, tft_buffer, TFT_PREVIEW_SIZE, TFT_PREVIEW_SIZE);
+}
+
+// ─── Tampilan Banner Mode Braille pada TFT LCD ────────────────────────────────
+void tampilkan_banner_braille_tft() {
+  if (!tft_siap) return;
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setCursor(18, 25);
+  tft.setTextColor(ST77XX_CYAN);
+  tft.setTextSize(2);
+  tft.println("ISYARA");
+
+  tft.setCursor(15, 55);
+  tft.setTextColor(ST77XX_YELLOW);
+  tft.setTextSize(1);
+  tft.println("MODE KEYBOARD BRAILLE");
+
+  tft.setCursor(22, 75);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.println("Gunakan Keypad 4x4");
+
+  tft.setCursor(16, 100);
+  tft.setTextColor(ST77XX_GREEN);
+  tft.println("[S1] -> Mode Kamera");
 }
 
 // ─── Ikon Status Kunci (Jam / Centang) pada OLED ──────────────────────────────
@@ -233,12 +251,6 @@ void update_layar_oled(String prediksi, float akurasi, int progress_persen,
   }
   display.print("]");
 
-  // Feedback Tombol Fisik Real-Time pada OLED
-  if (millis() - last_detected_time < 1500 && last_detected_pin_a > 0) {
-    display.setCursor(76, 34);
-    display.printf("%s", (char*)last_detected_label);
-  }
-
   // Baris 4: Auto-scroll teks kalimat (AI BISINDO + Braille bersatu)
   display.setCursor(0, 52);
   display.print("Teks: ");
@@ -276,7 +288,7 @@ void setup() {
     display.setCursor(0, 24);
     display.println("Dual Display & Audio");
     display.setCursor(0, 40);
-    display.println("Memulai perangkat...");
+    display.println("[S1] -> Braille Mode");
     display.display();
   }
 
@@ -289,24 +301,28 @@ void setup() {
   tft_siap = true;
   Serial.println("[TFT] ST7735S SPI Siap (CS:10, MOSI:11, SCK:12, DC:14, RST:15)");
 
-  // 4. Inisialisasi Keypad 4x4 Braille (Rows: 4,5,6,7 | Cols: 13,16,21,47)
+  // 4. Inisialisasi Keypad 4x4 Braille (Rows: 13,16,21,47 | Cols: 7,6,5,4)
   braille_keypad_init();
 
   // 5. Inisialisasi Modul Suara DFPlayer Mini (TX:1, RX:2, BUSY:42)
   audio.begin();
 
-  delay(1000);
+  delay(800);
 }
 
 // ─── Loop Utama ──────────────────────────────────────────────────────────────
 void loop() {
-  // [1] Selalu scan matriks tombol 4x4 secara non-blocking
+  // [1] Pindai keypad matriks 4x4
   braille_keypad_update();
 
-  // [2] Mode Braille: render visualizer OLED + lewati inferensi kamera
+  // [2] Mode Braille: render visualizer OLED & banner TFT
   if (current_device_mode == MODE_BRAILLE) {
+    if (tft_butuh_update_mode) {
+      tampilkan_banner_braille_tft();
+      tft_butuh_update_mode = false;
+    }
     render_braille_oled(display);
-    delay(15);
+    delay(20);
     return;
   }
 
@@ -382,7 +398,7 @@ void loop() {
             Serial.printf("[AI BISINDO] Huruf Terkunci: %s -> Kalimat: %s\n",
                           best_label.c_str(), kalimat.c_str());
 
-            // Output suara via DFPlayer Mini setiap kali kamera membaca & mengunci huruf
+            // Output suara via DFPlayer Mini
             if (best_label.length() > 0) {
               audio.playChar(best_label.charAt(0));
             }
