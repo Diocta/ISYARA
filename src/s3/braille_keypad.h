@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Adafruit_ST7735.h>
 #include "audio_manager.h"
 
 // =============================================================================
@@ -54,7 +55,7 @@ static bool key_state[4][4] = {false};
 static unsigned long key_debounce_time[4][4] = {0};
 const unsigned long DEBOUNCE_MS = 35;
 
-// Indikator Tombol Terakhir untuk Feedback Visual OLED
+// Indikator Tombol Terakhir untuk Feedback Visual OLED & TFT
 static char last_key_badge[16] = "";
 static unsigned long last_key_badge_time = 0;
 const unsigned long BADGE_DURATION_MS = 1800;
@@ -164,11 +165,12 @@ void commit_braille_char() {
 void handle_key_action(int key_num) {
   Serial.printf("[KEYPAD] Tombol S%d Ditekan! ", key_num);
 
-  // Jika sedang di mode AI BISINDO dan tombol pengetikan ditekan, otomatis beralih ke Braille mode
+  // Jika sedang di mode AI BISINDO dan tombol pengetikan ditekan, otomatis beralih ke Braille mode & matikan kamera
   if (key_num != 1 && current_device_mode != MODE_BRAILLE) {
     current_device_mode = MODE_BRAILLE;
     tft_butuh_update_mode = true;
-    Serial.print("[AUTO SWITCH KE BRAILLE MODE] ");
+    Serial1.write('S'); // Perintahkan ESP32-CAM untuk SLEEP / STANDBY mematikan sensor agar dingin
+    Serial.print("[AUTO SWITCH KE BRAILLE MODE (CAM SLEEP)] ");
     audio.playModeChange(true);
   }
 
@@ -180,11 +182,13 @@ void handle_key_action(int key_num) {
       tft_butuh_update_mode = true;
       if (current_device_mode == MODE_AI_BISINDO) {
         current_device_mode = MODE_BRAILLE;
-        Serial.println("-> MODE SWITCH: BRAILLE KEYBOARD AKTIF");
+        Serial1.write('S'); // Perintahkan ESP32-CAM untuk SLEEP / STANDBY mematikan sensor agar dingin
+        Serial.println("-> MODE SWITCH: BRAILLE KEYBOARD AKTIF (CAM SLEEP)");
         audio.playModeChange(true);
       } else {
         current_device_mode = MODE_AI_BISINDO;
-        Serial.println("-> MODE SWITCH: AI BISINDO AKTIF");
+        Serial1.write('W'); // Perintahkan ESP32-CAM untuk WAKE UP
+        Serial.println("-> MODE SWITCH: AI BISINDO AKTIF (CAM WAKE)");
         audio.playModeChange(false);
       }
       break;
@@ -336,75 +340,207 @@ void braille_keypad_update() {
   }
 }
 
-// Tampilan Visual Braille Khusus Layar OLED
-void render_braille_oled(Adafruit_SSD1306 &display) {
+// =============================================================================
+// 1. MONITOR UTAMA BRAILLE PADA LAYAR LCD TFT 1.77" (ST7735S 160x128 SPI)
+// =============================================================================
+// Menampilkan Grid 6 Titik Braille Berwarna, Karakter Preview Besar, Badge Tombol, & Kalimat
+void render_braille_tft(Adafruit_ST7735 &tft, bool force_redraw) {
+  static uint8_t prev_dots = 255;
+  static bool prev_num_mode = false;
+  static String prev_kalimat = "___INIT___";
+  static char prev_badge[16] = "___INIT___";
+
+  bool badge_active = (millis() - last_key_badge_time < BADGE_DURATION_MS && last_key_badge[0] != '\0');
+
+  if (force_redraw) {
+    tft.fillScreen(ST77XX_BLACK);
+
+    // Header Bar
+    tft.fillRect(0, 0, 160, 16, 0x0012); // Latar belakang biru tua
+    tft.setTextSize(1);
+    tft.setTextColor(ST77XX_CYAN, 0x0012);
+    tft.setCursor(4, 4);
+    tft.print("ISYARA BRAILLE");
+
+    // Garis Pemisah Header
+    tft.drawFastHLine(0, 16, 160, ST77XX_CYAN);
+
+    // Garis Pemisah Vertikal Tengah
+    tft.drawFastVLine(70, 17, 76, 0x31A6);
+
+    // Garis Pemisah Bawah (Area Teks)
+    tft.drawFastHLine(0, 93, 160, ST77XX_CYAN);
+    tft.setTextSize(1);
+    tft.setTextColor(ST77XX_YELLOW, ST77XX_BLACK);
+    tft.setCursor(4, 96);
+    tft.print("TEKS:");
+
+    prev_dots = 255;
+    prev_kalimat = "___FORCE___";
+    prev_badge[0] = '\0';
+  }
+
+  // A. Mode Badge di Header [A-Z] atau [NUM]
+  if (prev_num_mode != number_mode || force_redraw) {
+    prev_num_mode = number_mode;
+    tft.setTextSize(1);
+    tft.setCursor(120, 4);
+    if (number_mode) {
+      tft.setTextColor(ST77XX_ORANGE, 0x0012);
+      tft.print("[NUM]");
+    } else {
+      tft.setTextColor(ST77XX_GREEN, 0x0012);
+      tft.print("[A-Z]");
+    }
+  }
+
+  // B. Visualisasi 6 Titik Braille (Grid 2x3 di sisi kiri x:4 sampai x:68)
+  int tft_dot_coords[6][2] = {
+    {20, 30}, // Titik 1 (S2)
+    {20, 52}, // Titik 2 (S6)
+    {20, 74}, // Titik 3 (S10)
+    {50, 30}, // Titik 4 (S3)
+    {50, 52}, // Titik 5 (S7)
+    {50, 74}  // Titik 6 (S11)
+  };
+
+  if (prev_dots != braille_dots || force_redraw) {
+    for (int i = 0; i < 6; i++) {
+      int cx = tft_dot_coords[i][0];
+      int cy = tft_dot_coords[i][1];
+      bool is_on = (braille_dots & (1 << i));
+      bool was_on = (prev_dots & (1 << i));
+
+      if (is_on != was_on || force_redraw) {
+        if (is_on) {
+          tft.fillCircle(cx, cy, 7, ST77XX_YELLOW); // Aktif: Kuning Cerah
+          tft.drawCircle(cx, cy, 7, ST77XX_WHITE);
+        } else {
+          tft.fillCircle(cx, cy, 7, 0x18C3);        // Kosong: Abu-abu redup
+          tft.drawCircle(cx, cy, 7, 0x7BEF);
+        }
+      }
+    }
+    prev_dots = braille_dots;
+
+    // C. Karakter Preview Besar (Ukuran 4 di Sisi Kanan)
+    char preview_ch = decode_braille_to_char(braille_dots, number_mode);
+    tft.setTextSize(1);
+    tft.setTextColor(ST77XX_CYAN, ST77XX_BLACK);
+    tft.setCursor(80, 22);
+    tft.print("PREVIEW:");
+
+    tft.fillRect(84, 34, 48, 32, ST77XX_BLACK);
+    tft.setCursor(94, 36);
+    if (braille_dots != 0) {
+      tft.setTextSize(4);
+      tft.setTextColor(ST77XX_WHITE, ST77XX_BLACK);
+      if (preview_ch != '\0' && preview_ch != '?') {
+        tft.print(preview_ch);
+      } else {
+        tft.setTextColor(ST77XX_RED, ST77XX_BLACK);
+        tft.print("?");
+      }
+    } else {
+      tft.setTextSize(2);
+      tft.setTextColor(0x52AA, ST77XX_BLACK);
+      tft.setCursor(96, 42);
+      tft.print("[-]");
+    }
+  }
+
+  // D. Badge Tombol Terakhir
+  if (strcmp(prev_badge, last_key_badge) != 0 || force_redraw) {
+    strncpy(prev_badge, last_key_badge, sizeof(prev_badge));
+    tft.fillRect(74, 70, 84, 18, ST77XX_BLACK);
+    if (badge_active) {
+      tft.fillRoundRect(74, 70, 84, 18, 3, 0x001F);
+      tft.drawRoundRect(74, 70, 84, 18, 3, ST77XX_CYAN);
+      tft.setTextSize(1);
+      tft.setTextColor(ST77XX_YELLOW, 0x001F);
+      tft.setCursor(78, 75);
+      tft.print(last_key_badge);
+    } else {
+      tft.setTextSize(1);
+      tft.setTextColor(0x52AA, ST77XX_BLACK);
+      tft.setCursor(80, 75);
+      tft.print("Siap Ketik");
+    }
+  } else if (!badge_active && prev_badge[0] != '\0') {
+    prev_badge[0] = '\0';
+    tft.fillRect(74, 70, 84, 18, ST77XX_BLACK);
+    tft.setTextSize(1);
+    tft.setTextColor(0x52AA, ST77XX_BLACK);
+    tft.setCursor(80, 75);
+    tft.print("Siap Ketik");
+  }
+
+  // E. Baris Teks Kalimat Hasil Ketikan
+  if (prev_kalimat != kalimat || force_redraw) {
+    prev_kalimat = kalimat;
+    tft.fillRect(0, 107, 160, 20, ST77XX_BLACK);
+    tft.setCursor(4, 108);
+    tft.setTextSize(1);
+    if (kalimat.length() == 0) {
+      tft.setTextColor(0x7BEF, ST77XX_BLACK);
+      tft.print("(Mulai ketik via keypad)");
+    } else {
+      String teks_scroll = (kalimat.length() > 22)
+        ? (".." + kalimat.substring(kalimat.length() - 20))
+        : kalimat;
+      tft.setTextColor(ST77XX_GREEN, ST77XX_BLACK);
+      tft.print(teks_scroll);
+    }
+  }
+}
+
+// =============================================================================
+// 2. DASHBOARD & TELEMETRY SISTEM PADA LAYAR OLED KECIL 0.96" (SSD1306 128x64 I2C)
+// =============================================================================
+// Menampilkan Status Hardware, Kamera Sleep/Dingin, Statistik Kata, & Panduan Tombol
+void render_braille_oled_dashboard(Adafruit_SSD1306 &display) {
   display.clearDisplay();
 
-  // 1. Header & Status Mode
+  // 1. Header Bar
   display.setTextSize(1);
   display.setTextColor(WHITE);
   display.setCursor(0, 0);
-  display.print("BRAILLE MODE ");
-  if (number_mode) display.print("[NUM]");
-  else display.print("[A-Z]");
+  display.print("ISYARA | SYSTEM DASH");
+  display.drawFastHLine(0, 10, 128, WHITE);
 
-  // 2. Visualisasi 6 Titik Braille (2x3 Grid) di Sisi Kiri Layar
-  // Titik 1 (x:10, y:14) | Titik 4 (x:26, y:14)
-  // Titik 2 (x:10, y:25) | Titik 5 (x:26, y:25)
-  // Titik 3 (x:10, y:36) | Titik 6 (x:26, y:36)
-  int dot_coords[6][2] = {
-    {10, 14}, // Titik 1 (S2)
-    {10, 25}, // Titik 2 (S6)
-    {10, 36}, // Titik 3 (S10)
-    {26, 14}, // Titik 4 (S3)
-    {26, 25}, // Titik 5 (S7)
-    {26, 36}  // Titik 6 (S11)
-  };
+  // 2. Status ESP32-CAM (Konfirmasi Pengguna: Sensor Dimatikan & Bebas Overheat)
+  display.setCursor(0, 14);
+  display.print("Kamera : SLEEP [DINGIN]");
 
-  for (int i = 0; i < 6; i++) {
-    int cx = dot_coords[i][0];
-    int cy = dot_coords[i][1];
-    if (braille_dots & (1 << i)) {
-      display.fillCircle(cx, cy, 4, WHITE); // Titik Aktif (Bulatan Padat)
+  // 3. Statistik Pengetikan
+  display.setCursor(0, 25);
+  int kata_count = 0;
+  bool in_word = false;
+  for (unsigned int i = 0; i < kalimat.length(); i++) {
+    char c = kalimat.charAt(i);
+    if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+      if (!in_word) { kata_count++; in_word = true; }
     } else {
-      display.drawCircle(cx, cy, 4, WHITE); // Titik Kosong (Lingkaran Berongga)
+      in_word = false;
     }
   }
+  display.printf("Teks   : %d Kata (%d Hrf)", kata_count, kalimat.length());
 
-  // 3. Karakter Preview Real-Time (Ukuran Besar di Sisi Kanan)
-  char preview_ch = decode_braille_to_char(braille_dots, number_mode);
-  display.setCursor(46, 14);
-  display.setTextSize(1);
-  display.print("Char: ");
-  display.setTextSize(3);
-  display.setCursor(82, 14);
-  if (braille_dots != 0) {
-    if (preview_ch != '\0' && preview_ch != '?') {
-      display.print(preview_ch);
-    } else {
-      display.print("?");
-    }
-  } else {
-    display.setTextSize(1);
-    display.setCursor(82, 22);
-    display.print("[-]");
-  }
+  // 4. Status Modul Suara / DFPlayer Mini
+  display.setCursor(0, 36);
+  display.print("Audio  : SIAP (Vol 24/30)");
 
-  // 4. Feedback Real-Time Tombol Terakhir (Badge di x:46, y:38)
-  if (millis() - last_key_badge_time < BADGE_DURATION_MS && last_key_badge[0] != '\0') {
-    display.setTextSize(1);
-    display.setCursor(46, 38);
-    display.printf("[%s]", last_key_badge);
-  }
-
-  // 5. Baris Kalimat Teks Hasil Ketikan (Auto-scroll jika panjang)
-  display.setTextSize(1);
+  // 5. Divider Bawah & Petunjuk Cepat
+  display.drawFastHLine(0, 48, 128, WHITE);
   display.setCursor(0, 53);
-  display.print("Teks: ");
-  String teks_scroll = (kalimat.length() > 14) ? (".." + kalimat.substring(kalimat.length() - 12)) : kalimat;
-  display.print(teks_scroll);
+  display.print("[S1] Kamera  [S16] TTS");
 
   display.display();
+}
+
+// Kompatibilitas mundur
+void render_braille_oled(Adafruit_SSD1306 &display) {
+  render_braille_oled_dashboard(display);
 }
 
 #endif // BRAILLE_KEYPAD_H

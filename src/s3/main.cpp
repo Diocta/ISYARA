@@ -315,13 +315,13 @@ void loop() {
   // [1] Pindai keypad matriks 4x4
   braille_keypad_update();
 
-  // [2] Mode Braille: render visualizer OLED & banner TFT
+  // [2] Mode Braille: Monitoring Utama pada TFT & Dashboard Telemetry pada OLED
   if (current_device_mode == MODE_BRAILLE) {
+    render_braille_tft(tft, tft_butuh_update_mode);
     if (tft_butuh_update_mode) {
-      tampilkan_banner_braille_tft();
       tft_butuh_update_mode = false;
     }
-    render_braille_oled(display);
+    render_braille_oled_dashboard(display);
     delay(20);
     return;
   }

@@ -171,3 +171,23 @@ Dokumen ini berfungsi sebagai rekam jejak (changelog) dan dokumentasi berkelanju
     - Environment `esp32s3`: **SUCCESS** (RAM 19.4%, Flash 16.1%).
     - Environment `esp32cam`: **SUCCESS** (RAM 8.0%, Flash 11.1%).
 
+- **[17 Oktober 2026 - REDESAIN DUAL SCREEN ROLE & MANAJEMEN TERMAL ESP32-CAM SLEEP]**:
+  - **Pemberdayaan Penuh Layar TFT ST7735S 1.77" untuk Monitoring Braille:**
+    - Mengalihkan visualizer interaktif pengetikan Braille dari layar OLED kecil ke layar TFT berwarna yang berukuran jauh lebih besar (160x128).
+    - Menampilkan 6 bulatan titik Braille berukuran besar (radius 7px) dengan warna kuning terang saat aktif dan abu-abu saat kosong, garis pemisah artistik, preview karakter berukuran raksasa (Font size 4), kotak badge status tombol terakhir, dan baris kalimat teks yang otomatis bergulir (*auto-scroll*).
+    - Menerapkan *zero-flicker differential rendering* pada SPI bus ST7735S sehingga layar tidak berkedip saat digunakan mengetik.
+  - **Alih Fungsi Layar OLED 0.96" SSD1306 Menjadi System Dashboard & Telemetry:**
+    - Layar kecil OLED kini difungsikan sebagai pusat monitoring sistem (*System Dashboard*) saat Mode Braille aktif:
+      1. Konfirmasi status termal kamera: `Kamera : SLEEP [DINGIN]`
+      2. Statistik pengetikan: `Teks : X Kata (Y Hrf)` yang terhitung secara dinamis.
+      3. Status audio: `Audio : SIAP (Vol 24/30)`.
+      4. Petunjuk tombol cepat: `[S1] Kamera  [S16] TTS`.
+  - **Manajemen Termal & Proteksi Overheat ESP32-CAM via Hardware PWDN:**
+    - Menambahkan protokol perintah UART dua arah antara Master dan Slave:
+      - Saat beralih ke Mode Braille, ESP32-S3 otomatis mengirimkan perintah `'S'` (Sleep).
+      - ESP32-CAM mengeksekusi *hardware shutdown* pada sensor OV3660 dengan mengaktifkan pin `PWDN` (`digitalWrite(PWDN_GPIO_NUM, HIGH)`), mematikan sirkuit analog sensor kamera secara fisik, serta mengaktifkan delay CPU throttling 100ms. Suhu kamera dijamin dingin dan hemat konsumsi daya baterai.
+      - Saat beralih kembali ke Mode AI BISINDO, ESP32-S3 mengirimkan perintah `'W'` (Wake Up), dan ESP32-CAM menyalakan kembali sensor kamera via pin `PWDN` (`LOW`).
+  - **Status Kompilasi (Build Verification):**
+    - Environment `esp32cam`: **SUCCESS** (RAM 8.0%, Flash 11.1%).
+    - Environment `esp32s3`: **SUCCESS** (RAM 19.5%, Flash 16.1%).
+
