@@ -103,12 +103,15 @@ bool minta_dan_baca_frame() {
   while (Serial1.available()) Serial1.read(); // Bersihkan buffer sisa
   Serial1.write('C');                         // Kirim trigger capture
 
-  // Cari pasangan byte header [0xAA, 0x55]
-  unsigned long timeout_header = millis() + HEADER_TIMEOUT_MS;
+  // Cari pasangan byte header [0xAA, 0x55] (60ms cukup pada baudrate 460800)
+  unsigned long timeout_header = millis() + 60;
   bool    header_ketemu   = false;
   uint8_t byte_sebelumnya = 0;
 
   while (millis() < timeout_header) {
+    braille_keypad_update(); // Pastikan tombol S1-S16 selalu terbaca responsif
+    if (current_device_mode == MODE_BRAILLE) return false;
+
     while (Serial1.available()) {
       uint8_t b = (uint8_t)Serial1.read();
       if (byte_sebelumnya == 0xAA && b == 0x55) { header_ketemu = true; break; }
@@ -118,7 +121,7 @@ bool minta_dan_baca_frame() {
   }
 
   if (!header_ketemu) {
-    status_uart = "UART: Header gagal";
+    status_uart = "UART: Kamera Standby";
     return false;
   }
 
@@ -126,6 +129,9 @@ bool minta_dan_baca_frame() {
   size_t terbaca = 0;
   unsigned long timeout_data = millis() + FRAME_TIMEOUT_MS;
   while (terbaca < IMG_SIZE && millis() < timeout_data) {
+    braille_keypad_update();
+    if (current_device_mode == MODE_BRAILLE) return false;
+
     int s = Serial1.available();
     if (s > 0) {
       size_t baca = min((size_t)s, (size_t)(IMG_SIZE - terbaca));

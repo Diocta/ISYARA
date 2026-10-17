@@ -18,12 +18,12 @@
 #define DF_BUSY_PIN 42
 
 // Daftar Nomor Trek MP3 pada MicroSD (Folder /mp3/0001.mp3 dst)
-#define AUDIO_TRACK_SPACE       40  // Suara "Spasi" / Klik
-#define AUDIO_TRACK_BACKSPACE   41  // Suara "Hapus"
-#define AUDIO_TRACK_CLEAR       42  // Suara "Hapus Semua"
-#define AUDIO_TRACK_MODE_AI     50  // Suara "Mode BISINDO Aktif"
-#define AUDIO_TRACK_MODE_BRAILLE 51 // Suara "Mode Braille Aktif"
-#define AUDIO_TRACK_STARTUP     99  // Suara "ISYARA Siap"
+#define AUDIO_TRACK_SPACE        40  // Suara "Spasi" / Klik
+#define AUDIO_TRACK_BACKSPACE    41  // Suara "Hapus"
+#define AUDIO_TRACK_CLEAR        42  // Suara "Hapus Semua"
+#define AUDIO_TRACK_MODE_AI      50  // Suara "Mode BISINDO Aktif"
+#define AUDIO_TRACK_MODE_BRAILLE 51  // Suara "Mode Braille Aktif"
+#define AUDIO_TRACK_STARTUP      99  // Suara "ISYARA Siap"
 
 class AudioManager {
 private:
@@ -41,34 +41,21 @@ public:
     // Serial2 baudrate DFPlayer standar adalah 9600 baud
     mp3Serial.begin(9600, SERIAL_8N1, DF_RX_PIN, DF_TX_PIN);
 
-    Serial.println("[AUDIO] Menghubungkan ke modul DFPlayer Mini (TX:1, RX:2, BUSY:42)...");
+    Serial.println("[AUDIO] Memeriksa modul DFPlayer Mini (TX:1, RX:2)...");
     
-    // Timeout non-blocking: coba inisialisasi selama maksimal 1.2 detik
-    unsigned long start_init = millis();
-    bool detected = false;
-    while (millis() - start_init < 1200) {
-      if (dfplayer.begin(mp3Serial, /*isACK = */true, /*doReset = */true)) {
-        detected = true;
-        break;
-      }
-      delay(100);
+    // Inisialisasi cepat non-blocking (tanpa reset blocking agar alat langsung siap)
+    if (dfplayer.begin(mp3Serial, /*isACK = */false, /*doReset = */false)) {
+      is_initialized = true;
+      dfplayer.volume(volume_level);
+      dfplayer.outputDevice(DFPLAYER_DEVICE_SD);
+      Serial.printf("[AUDIO] DFPlayer Mini Terdeteksi & Aktif! Volume: %d/30\n", volume_level);
+      playTrack(AUDIO_TRACK_STARTUP);
+      return true;
     }
 
-    if (!detected) {
-      Serial.println("[AUDIO] PERINGATAN: DFPlayer Mini tidak merespon / kartu SD belum terpasang.");
-      Serial.println("[AUDIO] Sistem tetap berjalan normal tanpa output suara.");
-      is_initialized = false;
-      return false;
-    }
-
-    is_initialized = true;
-    dfplayer.volume(volume_level); // Set volume awal (0 - 30)
-    dfplayer.outputDevice(DFPLAYER_DEVICE_SD);
-    Serial.printf("[AUDIO] DFPlayer Mini Berhasil Aktif! Volume: %d/30\n", volume_level);
-
-    // Mainkan audio sapaan startup
-    playTrack(AUDIO_TRACK_STARTUP);
-    return true;
+    Serial.println("[AUDIO] Modul DFPlayer belum dicolok / dilewati. Sistem tetap berjalan normal tanpa audio.");
+    is_initialized = false;
+    return false;
   }
 
   bool isAvailable() const {
@@ -77,7 +64,6 @@ public:
 
   bool isPlaying() {
     if (!is_initialized) return false;
-    // Pin BUSY DFPlayer berlogika LOW saat sedang memutar suara
     return (digitalRead(DF_BUSY_PIN) == LOW);
   }
 
@@ -130,7 +116,6 @@ public:
   void readSentence(const String &text) {
     if (text.length() == 0) return;
     Serial.printf("[AUDIO] Membaca kalimat: \"%s\"\n", text.c_str());
-    // Baca karakter pertama sekarang, karakter berikutnya dapat dilanjutkan
     playChar(text.charAt(0));
   }
 };
