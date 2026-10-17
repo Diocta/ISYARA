@@ -91,3 +91,16 @@ Dokumen ini berfungsi sebagai rekam jejak (changelog) dan dokumentasi berkelanju
   - Menambahkan state `menunggu_lepas_tangan`: satu pose hanya dapat menambahkan satu huruf. Setelah huruf tersimpan, sistem menampilkan centang dan menunggu tangan/pose hilang selama 600 ms sebelum menerima huruf berikutnya. Ini mencegah teks berulang seperti `EEEE` atau `IIII` saat pose terus ditahan.
   - Teks hasil tidak dihapus otomatis; penghapusan, spasi, dan bersihkan teks direncanakan pada tahap tombol Braille/push button.
   - Hanya firmware environment `esp32s3` perlu di-upload ulang. ESP32-CAM, model, dan wiring tidak berubah.
+
+- **[15 Oktober 2026 - PREVIEW KAMERA KE TFT ST7735S]**:
+  - Menambahkan library Adafruit ST7735 dan preview frame 96x96 grayscale ke TFT 1.77 inci (diperbesar 128x128, di tengah layar 160x128) setiap frame UART diterima, sebelum inferensi. Logika AI, OLED, UART, dan teks tidak diubah.
+  - Wiring TFT -> ESP32-S3: GND->GND, VCC->3.3V, SCK->GPIO12, SDA->GPIO11, RES->GPIO15, RS->GPIO14, CS->GPIO10, LEDA->3.3V. Pin 9-14 TFT (touch/duplikat) tidak dipakai.
+  - Mengganti kode ESP32-CAM: WiFi dan web stream dihapus; CAM hanya mengirim frame saat menerima 'C'. Preview kini lewat TFT tanpa WiFi.
+  - Jika warna/posisi TFT bergeser, coba ganti INITR_BLACKTAB dengan INITR_GREENTAB atau INITR_REDTAB di setup(). Upload kedua env (esp32s3 dan esp32cam).
+
+- **[15 Oktober 2026 - PERBAIKAN STATUS HOLD/RELEASE OLED]**:
+  - Menghapus perilaku UI yang mengganti paksa label prediksi dengan huruf tersimpan saat menunggu pose dilepas. OLED kini menampilkan kelas dan confidence aktual model, bukan confidence kelas lain yang dipasangkan dengan huruf terkunci.
+  - Pelepasan pose kini dihitung jika confidence turun di bawah ambang atau kelas prediksi berubah dari huruf tersimpan, dan kondisi tersebut stabil selama 600 ms. Ini memungkinkan sistem siap menerima pose berikutnya meski model terus memilih salah satu kelas.
+  - Ikon centang hanya tampil 1 detik setelah huruf disimpan, lalu kembali menjadi ikon jam selama menunggu pose berikutnya. Progress bar juga kembali kosong setelah konfirmasi singkat.
+  - Tidak mengubah model, threshold, kamera, UART, TFT, dan wiring. Catatan: tanpa kelas idle pada model, latar kosong masih bisa diprediksi sebagai salah satu huruf; pengenalan idle yang benar memerlukan kelas idle/background pada dataset.
+  - Build kedua environment diperlukan untuk verifikasi; hanya firmware ESP32-S3 yang perlu di-upload untuk perubahan ini.

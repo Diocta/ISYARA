@@ -2,6 +2,8 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Adafruit_ST7735.h>
+#include <SPI.h>
 #include <BISINDO_inferencing.h>
 #include <esp_heap_caps.h>
 
@@ -12,6 +14,19 @@
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+// Pin SPI untuk TFT ST7735S 1.77" (LEDA/backlight langsung ke 3.3V)
+#define TFT_SCK 12
+#define TFT_MOSI 11
+#define TFT_CS 10
+#define TFT_DC 14
+#define TFT_RST 15
+#define TFT_PREVIEW_SIZE 128
+#define TFT_PREVIEW_X 16
+SPIClass tft_spi(FSPI);
+Adafruit_ST7735 tft(&tft_spi, TFT_CS, TFT_DC, TFT_RST);
+bool tft_siap = false;
+uint16_t tft_buffer[TFT_PREVIEW_SIZE * TFT_PREVIEW_SIZE];
 
 // Pin Serial1 untuk komunikasi dengan ESP32-CAM
 #define RX_CAM 18
@@ -36,8 +51,10 @@ unsigned long waktu_deteksi_mulai = 0;
 unsigned long waktu_pose_hilang = 0;
 const unsigned long HOLD_TIME_MS = 1200; // Tahan pose 1.2 detik untuk mengunci huruf
 const unsigned long RELEASE_TIME_MS = 600; // Lepaskan tangan sebelum huruf berikutnya
+const unsigned long CHECKMARK_TIME_MS = 1000; // Durasi ikon centang setelah huruf tersimpan
 const float CONFIDENCE_THRESHOLD = 0.55f; // Ambang batas keyakinan 55%
 bool menunggu_lepas_tangan = false;
+unsigned long waktu_huruf_terkunci = 0;
 
 // Edge Impulse meminta blok besar untuk tensor arena; gunakan PSRAM bila tersedia.
 void *ei_calloc(size_t nitems, size_t size) {
@@ -127,6 +144,21 @@ bool minta_dan_baca_frame() {
   return false;
 }
 
+// Tampilkan frame 96x96 grayscale ke TFT, diperbesar ke 128x128 (nearest neighbor)
+void tampilkan_preview_tft() {
+  if (!tft_siap) return;
+
+  for (int y = 0; y < TFT_PREVIEW_SIZE; y++) {
+    const uint8_t *baris = &img_buffer[(y * 96 / TFT_PREVIEW_SIZE) * 96];
+    uint16_t *keluaran = &tft_buffer[y * TFT_PREVIEW_SIZE];
+    for (int x = 0; x < TFT_PREVIEW_SIZE; x++) {
+      uint8_t g = baris[x * 96 / TFT_PREVIEW_SIZE];
+      keluaran[x] = ((g & 0xF8) << 8) | ((g & 0xFC) << 3) | (g >> 3);
+    }
+  }
+  tft.drawRGBBitmap(TFT_PREVIEW_X, 0, tft_buffer, TFT_PREVIEW_SIZE, TFT_PREVIEW_SIZE);
+}
+
 void gambar_status_kunci(bool terkunci) {
   if (terkunci) {
     display.drawLine(1, 39, 4, 42, WHITE);
@@ -202,11 +234,19 @@ void setup() {
   display.setCursor(0, 20);
   display.println("Sistem ISYARA Siap");
   display.display();
+
+  tft_spi.begin(TFT_SCK, -1, TFT_MOSI, TFT_CS);
+  tft.initR(INITR_BLACKTAB);
+  tft.setSPISpeed(27000000);
+  tft.setRotation(1);
+  tft.fillScreen(ST77XX_BLACK);
+  tft_siap = true;
 }
 
 void loop() {
   // 1. Minta 1 frame ke kamera via Handshake
   if (minta_dan_baca_frame()) {
+    tampilkan_preview_tft();
     
     // 2. Siapkan data untuk inferensi Edge Impulse
     signal_t signal;
@@ -228,32 +268,15 @@ void loop() {
         }
       }
 
-      // 4. Logika Ambang Batas, tahan pose, dan lepas tangan sebelum input berikutnya
+      // 4. Logika ambang batas, tahan pose, dan lepas tangan sebelum input berikutnya
       int progress = 0;
-      if (best_value >= CONFIDENCE_THRESHOLD) {
-        waktu_pose_hilang = 0;
+      bool prediksi_valid = best_value >= CONFIDENCE_THRESHOLD;
 
-        if (menunggu_lepas_tangan) {
-          best_label = huruf_terkunci;
-          progress = 100;
-        } else if (best_label == huruf_terakhir) {
-          unsigned long durasi = millis() - waktu_deteksi_mulai;
-          progress = min(100, (int)((durasi * 100) / HOLD_TIME_MS));
-
-          if (durasi >= HOLD_TIME_MS) {
-            kalimat += best_label;
-            huruf_terkunci = best_label;
-            menunggu_lepas_tangan = true;
-            progress = 100;
-          }
-        } else {
-          huruf_terakhir = best_label;
-          waktu_deteksi_mulai = millis();
-        }
-      } else {
-        best_label = "-";
-
-        if (menunggu_lepas_tangan) {
+      if (menunggu_lepas_tangan) {
+        // Lepas dianggap terdeteksi jika model kehilangan keyakinan atau kelas
+        // prediksi berubah dari huruf yang baru saja disimpan secara stabil.
+        bool sinyal_lepas = !prediksi_valid || best_label != huruf_terkunci;
+        if (sinyal_lepas) {
           if (waktu_pose_hilang == 0) {
             waktu_pose_hilang = millis();
           } else if (millis() - waktu_pose_hilang >= RELEASE_TIME_MS) {
@@ -263,19 +286,43 @@ void loop() {
             waktu_deteksi_mulai = 0;
             waktu_pose_hilang = 0;
           }
-
-          if (menunggu_lepas_tangan) {
-            best_label = huruf_terkunci;
-            progress = 100;
-          }
         } else {
-          huruf_terakhir = "";
-          progress = 0;
+          waktu_pose_hilang = 0;
         }
       }
 
+      if (menunggu_lepas_tangan) {
+        if (!prediksi_valid) {
+          best_label = "-";
+        }
+        progress = (millis() - waktu_huruf_terkunci < CHECKMARK_TIME_MS) ? 100 : 0;
+      } else if (prediksi_valid) {
+        waktu_pose_hilang = 0;
+        if (best_label == huruf_terakhir) {
+          unsigned long durasi = millis() - waktu_deteksi_mulai;
+          progress = min(100, (int)((durasi * 100) / HOLD_TIME_MS));
+
+          if (durasi >= HOLD_TIME_MS) {
+            kalimat += best_label;
+            huruf_terkunci = best_label;
+            menunggu_lepas_tangan = true;
+            waktu_huruf_terkunci = millis();
+            progress = 100;
+          }
+        } else {
+          huruf_terakhir = best_label;
+          waktu_deteksi_mulai = millis();
+        }
+      } else {
+        best_label = "-";
+        huruf_terakhir = "";
+        progress = 0;
+      }
+
       // 5. Perbarui tampilan di Layar OLED
-      update_layar_oled(best_label, best_value, progress, menunggu_lepas_tangan);
+      bool tampilkan_centang = menunggu_lepas_tangan &&
+                               millis() - waktu_huruf_terkunci < CHECKMARK_TIME_MS;
+      update_layar_oled(best_label, best_value, progress, tampilkan_centang);
     } else {
       Serial.printf("AI gagal: run_classifier() mengembalikan %d\n", (int)res);
       update_layar_oled("ERR", 0.0f, 0, false);
