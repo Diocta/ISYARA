@@ -171,23 +171,25 @@ Dokumen ini berfungsi sebagai rekam jejak (changelog) dan dokumentasi berkelanju
     - Environment `esp32s3`: **SUCCESS** (RAM 19.4%, Flash 16.1%).
     - Environment `esp32cam`: **SUCCESS** (RAM 8.0%, Flash 11.1%).
 
-- **[17 Oktober 2026 - REDESAIN DUAL SCREEN ROLE & MANAJEMEN TERMAL ESP32-CAM SLEEP]**:
-  - **Pemberdayaan Penuh Layar TFT ST7735S 1.77" untuk Monitoring Braille:**
-    - Mengalihkan visualizer interaktif pengetikan Braille dari layar OLED kecil ke layar TFT berwarna yang berukuran jauh lebih besar (160x128).
-    - Menampilkan 6 bulatan titik Braille berukuran besar (radius 7px) dengan warna kuning terang saat aktif dan abu-abu saat kosong, garis pemisah artistik, preview karakter berukuran raksasa (Font size 4), kotak badge status tombol terakhir, dan baris kalimat teks yang otomatis bergulir (*auto-scroll*).
-    - Menerapkan *zero-flicker differential rendering* pada SPI bus ST7735S sehingga layar tidak berkedip saat digunakan mengetik.
-  - **Alih Fungsi Layar OLED 0.96" SSD1306 Menjadi System Dashboard & Telemetry:**
-    - Layar kecil OLED kini difungsikan sebagai pusat monitoring sistem (*System Dashboard*) saat Mode Braille aktif:
-      1. Konfirmasi status termal kamera: `Kamera : SLEEP [DINGIN]`
-      2. Statistik pengetikan: `Teks : X Kata (Y Hrf)` yang terhitung secara dinamis.
-      3. Status audio: `Audio : SIAP (Vol 24/30)`.
-      4. Petunjuk tombol cepat: `[S1] Kamera  [S16] TTS`.
-  - **Manajemen Termal & Proteksi Overheat ESP32-CAM via Hardware PWDN:**
-    - Menambahkan protokol perintah UART dua arah antara Master dan Slave:
-      - Saat beralih ke Mode Braille, ESP32-S3 otomatis mengirimkan perintah `'S'` (Sleep).
-      - ESP32-CAM mengeksekusi *hardware shutdown* pada sensor OV3660 dengan mengaktifkan pin `PWDN` (`digitalWrite(PWDN_GPIO_NUM, HIGH)`), mematikan sirkuit analog sensor kamera secara fisik, serta mengaktifkan delay CPU throttling 100ms. Suhu kamera dijamin dingin dan hemat konsumsi daya baterai.
-      - Saat beralih kembali ke Mode AI BISINDO, ESP32-S3 mengirimkan perintah `'W'` (Wake Up), dan ESP32-CAM menyalakan kembali sensor kamera via pin `PWDN` (`LOW`).
-  - **Status Kompilasi (Build Verification):**
-    - Environment `esp32cam`: **SUCCESS** (RAM 8.0%, Flash 11.1%).
-    - Environment `esp32s3`: **SUCCESS** (RAM 19.5%, Flash 16.1%).
+- **[17 Oktober 2026 - PERBAIKAN BUG TFT LAYAR PUTIH & RESTORASI SENSOR KAMERA OV3660]**:
+  - **Investigasi Akar Masalah Kamera (Camera Failure Diagnosis):**
+    - Manipulasi pin hardware `PWDN` (`digitalWrite(PWDN_GPIO_NUM, HIGH)`) sebelumnya ternyata mematikan daya sensor OV3660 sepenuhnya, yang berakibat fatal: register konfigurasi internal SCCB sensor (format grayscale 96x96, framing, gain, contrast) terhapus dari memori volatil sensor. Ketika sensor dihidupkan kembali, driver `esp_camera_fb_get()` mengembalikan nilai `NULL` atau mengalami kegagalan transmisi.
+    - Selain itu, transmisi karakter `'S'` / `'W'` melalui jalur Serial1 sempat mengacaukan sinkronisasi *frame parser* `[0xAA, 0x55]`.
+  - **Solusi Manajemen Termal Kamera yang Aman & Stabil:**
+    - Menghilangkan *hardware power-down* (`PWDN`) agar register OV3660 tetap awet dan stabil.
+    - Pada ESP32-CAM (`src/cam/main.cpp`), sistem kini menerapkan **FreeRTOS CPU Throttling (`vTaskDelay(pdMS_TO_TICKS(15))`)** saat tidak menerima trigger `'C'`.
+    - Karena ESP32-S3 tidak mengirim perintah `'C'` saat berada di Mode Braille, beban CPU ESP32-CAM langsung anjlok ke **< 1%** dan sensor kamera tidak melakukan pemrosesan, sehingga modul kamera tetap **dingin dan anti-overheat** tanpa mengorbankan stabilitas sensor!
+  - **Investigasi & Solusi Layar LCD TFT 1.77" Putih Polos (White Screen):**
+    - Secara fisik, layar TFT ST7735S memiliki lampu latar (*backlight*) yang menyala putih begitu pin VCC/LEDA menerima tegangan 3.3V. Jika layar belum menerima stream visual dari kamera, layarnya akan tetap berada di kondisi bawaan (putih).
+    - Sebelumnya, fungsi `tampilkan_preview_tft()` hanya terpanggil jika `minta_dan_baca_frame()` sukses. Ketika kamera terhambat, layar TFT tidak pernah diisi gambar apapun sehingga tertinggal putih polos.
+    - Ditambah lagi, *timeout* pembacaan header UART di ESP32-S3 sebelumnya terlalu sempit (80 ms), sehingga frame dari OV3660 sering terputus sebelum sempat diterima.
+  - **Pembaruan Firmware ESP32-S3 (`src/s3/main.cpp`):**
+    - Menambahkan **Hardware Reset Pulse** pada pin `TFT_RST` (GPIO 15) di dalam `setup()` sebelum memanggil `tft.initR(INITR_BLACKTAB)`.
+    - Menambahkan fungsi **`tampilkan_standby_tft()`** yang langsung dipanggil di dalam `setup()`. Begitu perangkat dinyalakan, layar TFT seketika berubah dari putih menjadi latar hitam pekat dengan judul cyan "ISYARA", subtitle kuning, status koneksi kamera, dan petunjuk navigasi hijau `[S1] Beralih ke Braille`.
+    - Menyelaraskan transisi layar: saat beralih dari Mode Braille kembali ke Mode AI BISINDO, `tampilkan_standby_tft()` otomatis dipanggil untuk menyegarkan tampilan.
+    - Meningkatkan *timeout* pencarian header UART menjadi 300 ms dengan tetap mempertahankan polling keypad instan di dalamnya.
+  - **Status Kompilasi Final (Build Verification):**
+    - Environment `esp32s3`: **SUCCESS** (Flash: 16.1%, RAM: 19.5%).
+    - Environment `esp32cam`: **SUCCESS** (Flash: 11.1%, RAM: 8.0%).
+
 

@@ -104,8 +104,8 @@ bool minta_dan_baca_frame() {
   while (Serial1.available()) Serial1.read(); // Bersihkan buffer sisa
   Serial1.write('C');                         // Kirim trigger capture
 
-  // Cari pasangan byte header [0xAA, 0x55] (snappy 80ms timeout)
-  unsigned long timeout_header = millis() + 80;
+  // Cari pasangan byte header [0xAA, 0x55] (timeout 300ms agar kamera OV3660 sempat capture)
+  unsigned long timeout_header = millis() + 300;
   bool    header_ketemu   = false;
   uint8_t byte_sebelumnya = 0;
 
@@ -168,27 +168,36 @@ void tampilkan_preview_tft() {
   tft.drawRGBBitmap(TFT_PREVIEW_X, 0, tft_buffer, TFT_PREVIEW_SIZE, TFT_PREVIEW_SIZE);
 }
 
-// ─── Tampilan Banner Mode Braille pada TFT LCD ────────────────────────────────
-void tampilkan_banner_braille_tft() {
+// ─── Tampilan Layar Standby/Startup pada TFT LCD ST7735S ─────────────────────
+void tampilkan_standby_tft() {
   if (!tft_siap) return;
   tft.fillScreen(ST77XX_BLACK);
-  tft.setCursor(18, 25);
-  tft.setTextColor(ST77XX_CYAN);
+
+  // Header Box
+  tft.fillRect(0, 0, 160, 22, 0x0012);
+  tft.drawFastHLine(0, 22, 160, ST77XX_CYAN);
+  tft.setCursor(44, 4);
+  tft.setTextColor(ST77XX_CYAN, 0x0012);
   tft.setTextSize(2);
-  tft.println("ISYARA");
+  tft.print("ISYARA");
 
-  tft.setCursor(15, 55);
-  tft.setTextColor(ST77XX_YELLOW);
+  // Status Body
   tft.setTextSize(1);
-  tft.println("MODE KEYBOARD BRAILLE");
+  tft.setTextColor(ST77XX_YELLOW, ST77XX_BLACK);
+  tft.setCursor(12, 36);
+  tft.print("BISINDO AI & BRAILLE");
 
-  tft.setCursor(22, 75);
-  tft.setTextColor(ST77XX_WHITE);
-  tft.println("Gunakan Keypad 4x4");
+  tft.setTextColor(ST77XX_WHITE, ST77XX_BLACK);
+  tft.setCursor(12, 54);
+  tft.print("Kamera : Menghubungkan..");
+  tft.setCursor(12, 70);
+  tft.print("Baud   : 460800 8N1");
 
-  tft.setCursor(16, 100);
-  tft.setTextColor(ST77XX_GREEN);
-  tft.println("[S1] -> Mode Kamera");
+  // Petunjuk Tombol
+  tft.drawFastHLine(0, 94, 160, 0x31A6);
+  tft.setCursor(8, 106);
+  tft.setTextColor(ST77XX_GREEN, ST77XX_BLACK);
+  tft.print("[S1] Beralih ke Braille");
 }
 
 // ─── Ikon Status Kunci (Jam / Centang) pada OLED ──────────────────────────────
@@ -293,21 +302,29 @@ void setup() {
   }
 
   // 3. Inisialisasi Layar LCD TFT 1.77" ST7735S (SPI FSPI)
+  pinMode(TFT_RST, OUTPUT);
+  digitalWrite(TFT_RST, HIGH);
+  delay(10);
+  digitalWrite(TFT_RST, LOW);
+  delay(10);
+  digitalWrite(TFT_RST, HIGH);
+  delay(20);
+
   tft_spi.begin(TFT_SCK, -1, TFT_MOSI, TFT_CS);
   tft.initR(INITR_BLACKTAB);
-  tft.setSPISpeed(27000000);
+  tft.setSPISpeed(20000000);
   tft.setRotation(1);
-  tft.fillScreen(ST77XX_BLACK);
   tft_siap = true;
+  tampilkan_standby_tft();
   Serial.println("[TFT] ST7735S SPI Siap (CS:10, MOSI:11, SCK:12, DC:14, RST:15)");
 
-  // 4. Inisialisasi Keypad 4x4 Braille (Rows: 13,16,21,47 | Cols: 7,6,5,4)
+  // 4. Inisialisasi Keypad 4x4 Braille (Rows: 13,16,47,21 | Cols: 7,6,5,4)
   braille_keypad_init();
 
   // 5. Inisialisasi Modul Suara DFPlayer Mini (TX:1, RX:2, BUSY:42)
   audio.begin();
 
-  delay(800);
+  delay(500);
 }
 
 // ─── Loop Utama ──────────────────────────────────────────────────────────────
@@ -324,6 +341,12 @@ void loop() {
     render_braille_oled_dashboard(display);
     delay(20);
     return;
+  }
+
+  // Jika baru saja beralih dari Mode Braille ke Mode AI BISINDO, refresh tampilan standby TFT
+  if (tft_butuh_update_mode) {
+    tampilkan_standby_tft();
+    tft_butuh_update_mode = false;
   }
 
   // [3] Mode AI BISINDO: minta frame dari kamera ESP32-CAM via UART

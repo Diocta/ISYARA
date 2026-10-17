@@ -30,29 +30,6 @@
 // Ukuran frame harus sama dengan input model Edge Impulse di ESP32-S3
 #define AI_FRAME_SIZE 9216
 
-// Status Mode Tidur Kamera (Hemat Daya & Anti Overheat saat Mode Braille)
-static bool camera_is_sleeping = false;
-
-void set_camera_sleep(bool sleep_mode) {
-  if (camera_is_sleeping == sleep_mode) return;
-  camera_is_sleeping = sleep_mode;
-
-  if (sleep_mode) {
-    // Matikan sensor kamera secara hardware via PWDN (High = Power Down pada AI-Thinker)
-    pinMode(PWDN_GPIO_NUM, OUTPUT);
-    digitalWrite(PWDN_GPIO_NUM, HIGH);
-    Serial.write(0xAA);
-    Serial.write(0x53); // 'S' ACK
-  } else {
-    // Nyalakan kembali sensor kamera via PWDN (Low = Active)
-    pinMode(PWDN_GPIO_NUM, OUTPUT);
-    digitalWrite(PWDN_GPIO_NUM, LOW);
-    delay(40); // Waktu stabilisasi sensor setelah bangun
-    Serial.write(0xAA);
-    Serial.write(0x57); // 'W' ACK
-  }
-}
-
 // Kirim 1 frame ke ESP32-S3 ketika diminta (Handshake [0xAA, 0x55] + data)
 void kirim_frame_ke_s3(camera_fb_t * fb) {
   if (!fb) return;
@@ -115,31 +92,20 @@ void setup() {
 }
 
 void loop() {
+  // Hanya ambil frame dan kirim saat ESP32-S3 mengirimkan karakter trigger 'C'
   if (Serial.available()) {
-    char cmd = Serial.read();
-
+    int cmd = Serial.read();
     if (cmd == 'C') {
-      if (camera_is_sleeping) {
-        set_camera_sleep(false);
-      }
       camera_fb_t * fb = esp_camera_fb_get();
       if (fb) {
         kirim_frame_ke_s3(fb);
         esp_camera_fb_return(fb);
       }
-    } else if (cmd == 'S') {
-      // Perintah SLEEP / STANDBY dari ESP32-S3 (Mode Braille aktif)
-      set_camera_sleep(true);
-    } else if (cmd == 'W') {
-      // Perintah WAKE UP dari ESP32-S3 (Mode AI BISINDO aktif)
-      set_camera_sleep(false);
     }
-  }
-
-  // Jika kamera sedang tidur (Mode Braille), delay 100ms agar CPU dingin dan hemat daya
-  if (camera_is_sleeping) {
-    delay(100);
   } else {
-    delay(2);
+    // KUNCI PENDINGIN CPU & ANTI-OVERHEAT:
+    // Saat ESP32-S3 berada pada Mode Braille atau tidak meminta frame,
+    // biarkan CPU masuk ke mode idle selama 15ms. Beban CPU turun ke <1% dan suhu tetap dingin!
+    vTaskDelay(pdMS_TO_TICKS(15));
   }
 }

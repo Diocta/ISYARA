@@ -165,12 +165,11 @@ void commit_braille_char() {
 void handle_key_action(int key_num) {
   Serial.printf("[KEYPAD] Tombol S%d Ditekan! ", key_num);
 
-  // Jika sedang di mode AI BISINDO dan tombol pengetikan ditekan, otomatis beralih ke Braille mode & matikan kamera
+  // Jika sedang di mode AI BISINDO dan tombol pengetikan ditekan, otomatis beralih ke Braille mode
   if (key_num != 1 && current_device_mode != MODE_BRAILLE) {
     current_device_mode = MODE_BRAILLE;
     tft_butuh_update_mode = true;
-    Serial1.write('S'); // Perintahkan ESP32-CAM untuk SLEEP / STANDBY mematikan sensor agar dingin
-    Serial.print("[AUTO SWITCH KE BRAILLE MODE (CAM SLEEP)] ");
+    Serial.print("[AUTO SWITCH KE BRAILLE MODE] ");
     audio.playModeChange(true);
   }
 
@@ -182,13 +181,11 @@ void handle_key_action(int key_num) {
       tft_butuh_update_mode = true;
       if (current_device_mode == MODE_AI_BISINDO) {
         current_device_mode = MODE_BRAILLE;
-        Serial1.write('S'); // Perintahkan ESP32-CAM untuk SLEEP / STANDBY mematikan sensor agar dingin
-        Serial.println("-> MODE SWITCH: BRAILLE KEYBOARD AKTIF (CAM SLEEP)");
+        Serial.println("-> MODE SWITCH: BRAILLE KEYBOARD AKTIF");
         audio.playModeChange(true);
       } else {
         current_device_mode = MODE_AI_BISINDO;
-        Serial1.write('W'); // Perintahkan ESP32-CAM untuk WAKE UP
-        Serial.println("-> MODE SWITCH: AI BISINDO AKTIF (CAM WAKE)");
+        Serial.println("-> MODE SWITCH: AI BISINDO AKTIF");
         audio.playModeChange(false);
       }
       break;
