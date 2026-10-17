@@ -137,3 +137,37 @@ Dokumen ini berfungsi sebagai rekam jejak (changelog) dan dokumentasi berkelanju
     - Memutus daya secara fisik pada seluruh modul saat OFF untuk efisiensi baterai 0 mA quiescent.
   - **Status Build Firmware:** Kedua target (`esp32s3` dan `esp32cam`) berhasil dikompilasi 100% SUKSES tanpa error.
 
+- **[17 Oktober 2026 - KALIBRASI MATRIKS KEYPAD 4x4, ELIMINASI RACE CONDITION OLED, & PENINGKATAN UX BRAILLE]**:
+  - **Investigasi & Kalibrasi Pemetaan Pinout Matriks 4x4 Tactile:**
+    - Melakukan penelusuran kontinuitas hardware pada modul 4x4 tombol taktil standar (header 8-pin: Pin 1–4 untuk Kolom C4–C1, Pin 5–8 untuk Baris R1–R4).
+    - Memetakan kabel jumper fisik ESP32-S3:
+      - Pin 1 (Top) = Col 4 -> GPIO 4
+      - Pin 2 = Col 3 -> GPIO 5
+      - Pin 3 = Col 2 -> GPIO 6
+      - Pin 4 = Col 1 -> GPIO 7
+      - Pin 5 = Row 1 -> GPIO 13 (Baris 1: S1, S2, S3, S4)
+      - Pin 6 = Row 2 -> GPIO 16 (Baris 2: S5, S6, S7, S8)
+      - Pin 7 = Row 4 -> GPIO 21 (Baris 4: S13, S14, S15, S16)
+      - Pin 8 (Bottom) = Row 3 -> GPIO 47 (Baris 3: S9, S10, S11, S12)
+    - **Solusi Masalah Dot Bawah di S14 & S15:**
+      - Terjadi inversi pemetaan baris pada perangkat keras: Pin 7 (GPIO 21) terhubung ke baris fisik ke-4, sedangkan Pin 8 (GPIO 47) terhubung ke baris fisik ke-3.
+      - Memperbarui array baris di `src/s3/braille_keypad.h` menjadi `ROW_PINS[4] = { 13, 16, 47, 21 }`.
+      - Hasilnya, **Titik 3 & Titik 6 Braille** kembali presisi ke posisi ergonomisnya di tombol fisik **S10** (Kiri Bawah) dan **S11** (Kanan Bawah).
+      - Tombol **S14** dan **S15** kembali ke fungsinya sebagai jalan pintas baris bawah untuk **Spasi** dan **Enter**.
+  - **Eliminasi Race Condition / Corrupt Display OLED SSD1306:**
+    - Pemindaian keypad yang sempat dicoba dijalankan pada FreeRTOS Task di Core 0 dihapus karena menyebabkan tabrakan buffer I2C dengan proses rendering display di Core 1 (mengakibatkan layar OLED corrupt / glitch piksel).
+    - Polling scanner dikembalikan ke single-threaded non-blocking di dalam `loop()` dan loop penungguan header UART `minta_dan_baca_frame()`. Tampilan OLED kembali 100% jernih dan stabil.
+  - **Peningkatan Sistem Debounce Independen Per-Tombol:**
+    - Mengganti variabel debounce tunggal dengan array per-tombol `key_debounce_time[4][4]` (interval 35 ms). Hal ini mencegah tertelannya (*drop*) input saat pengetikan cepat atau saat dua tombol ditekan dalam interval berdekatan.
+  - **Fitur Auto-Switch Mode Braille dari Pengetikan Fisik:**
+    - Jika sistem sedang berada pada Mode AI BISINDO dan pengguna mulai menekan tombol pengetikan (S2–S16), sistem akan **otomatis beralih ke Mode Braille** seketika tanpa mengharuskan pengguna menekan tombol mode switch S1 terlebih dahulu.
+  - **Indikator Badge Real-Time pada Layar OLED:**
+    - Menambahkan notifikasi visual instan berdurasi 1.8 detik pada koordinat (x:46, y:38) di layar OLED (contoh: `[S10:DOT 3]`, `[S4:CLEAR]`, `[S8:ENTER]`, `[S9:SPASI]`, `[S12:[NUM]]`, `[S16:TTS]`). Pengguna mendapatkan kepastian visual seketika untuk setiap aksi tombol.
+  - **Optimasi Waktu Auto-Commit Braille:**
+    - Meningkatkan batas waktu penguncian karakter otomatis (*auto-commit timeout*) dari 850 ms menjadi **2500 ms (2.5 detik)** agar pengguna memiliki waktu yang cukup leluasa untuk memeriksa pratinjau huruf sebelum karakter terkunci ke dalam kalimat. Pengguna juga dapat mengunci huruf secara manual kapan saja dengan menekan tombol **S8 / S15 [ENTER]**.
+  - **Banner Informatif TFT ST7735S pada Mode Braille:**
+    - Saat Mode Braille aktif, kamera dipause dan layar TFT menampilkan banner visual cyan-kuning "MODE KEYBOARD BRAILLE" untuk menghemat daya dan mencegah kebingungan layar blank.
+  - **Status Kompilasi (Build Verification):**
+    - Environment `esp32s3`: **SUCCESS** (RAM 19.4%, Flash 16.1%).
+    - Environment `esp32cam`: **SUCCESS** (RAM 8.0%, Flash 11.1%).
+
