@@ -8,10 +8,7 @@
 
 // =============================================================================
 // ISYARA - Modul Keyboard Braille 4x4 Tactile Matrix (ESP32-S3)
-// =============================================================================
-// Modul: 16 Tactile Push Button Matrix (S1 sampai S16)
-// Koneksi ke ESP32-S3: 8 Pin (4 Baris / Rows + 4 Kolom / Cols)
-// Telah disesuaikan agar TIDAK bertabrakan dengan SPI TFT ST7735S (GPIO 10,11,12,14,15)
+// Menggunakan FreeRTOS Task pada Core 0 (Independent Scanner)
 // =============================================================================
 
 // Pinout Rows (Header Kiri: Pin 4, 5, 6, 7 berurutan)
@@ -45,24 +42,23 @@ const unsigned long DEBOUNCE_MS = 25;
 // Bit 0: Titik 1 (S2)  | Bit 3: Titik 4 (S3)
 // Bit 1: Titik 2 (S6)  | Bit 4: Titik 5 (S7)
 // Bit 2: Titik 3 (S10) | Bit 5: Titik 6 (S11)
-static uint8_t braille_dots = 0;
-static bool number_mode = false;
-static unsigned long last_dot_time = 0;
-const unsigned long AUTO_COMMIT_MS = 850; // Otomatis commit jika tidak ada titik baru ditekan
+static volatile uint8_t braille_dots = 0;
+static volatile bool number_mode = false;
+static volatile unsigned long last_dot_time = 0;
+const unsigned long AUTO_COMMIT_MS = 850;
 
 // Mode Sistem
 enum DeviceMode {
   MODE_AI_BISINDO = 0,
   MODE_BRAILLE = 1
 };
-extern DeviceMode current_device_mode;
+extern volatile DeviceMode current_device_mode;
 extern String kalimat;
 
 // Fungsi Dekoder Braille (Mask 6-bit -> Karakter ASCII)
 char decode_braille_to_char(uint8_t mask, bool is_num) {
   if (mask == 0) return '\0';
 
-  // Standar Huruf A - Z (Grade 1 Braille)
   char ch = '\0';
   switch (mask) {
     case 0b000001: ch = 'A'; break; // Titik 1
@@ -110,17 +106,6 @@ char decode_braille_to_char(uint8_t mask, bool is_num) {
   return ch;
 }
 
-// Inisialisasi Pin Keypad 4x4
-void braille_keypad_init() {
-  for (int r = 0; r < 4; r++) {
-    pinMode(ROW_PINS[r], INPUT_PULLUP);
-  }
-  for (int c = 0; c < 4; c++) {
-    pinMode(COL_PINS[c], INPUT); // High-impedance saat tidak aktif
-  }
-  Serial.println("[BRAILLE] Keypad 4x4 Diinisialisasi (R: 4,5,6,7 | C: 13,16,21,47)");
-}
-
 // Fungsi Commit Karakter Braille ke Kalimat
 void commit_braille_char() {
   if (braille_dots != 0) {
@@ -128,7 +113,6 @@ void commit_braille_char() {
     if (c != '\0' && c != '?') {
       kalimat += c;
       Serial.printf("[BRAILLE] Huruf Dikunci: '%c' (Mask: 0x%02X) -> Kalimat: %s\n", c, braille_dots, kalimat.c_str());
-      // Output suara dari DFPlayer Mini setiap huruf braille diketik
       audio.playChar(c);
     } else {
       Serial.printf("[BRAILLE] Pola Titik Tidak Dikenal (Mask: 0x%02X)\n", braille_dots);
@@ -178,7 +162,7 @@ void handle_key_action(int key_num) {
     case 5:  // S5: Backspace (Hapus 1 Karakter Terakhir)
     case 13: // S13: Alternatif Backspace
       if (braille_dots != 0) {
-        braille_dots = 0; // Batalkan pola titik yang sedang dirangkai
+        braille_dots = 0;
         Serial.println("-> Batalkan Titik Aktif");
       } else if (kalimat.length() > 0) {
         kalimat.remove(kalimat.length() - 1);
@@ -207,7 +191,7 @@ void handle_key_action(int key_num) {
 
     case 9:  // S9: Spasi
     case 14: // S14: Alternatif Spasi (Jempol Bawah)
-      commit_braille_char(); // Commit huruf sebelumnya dulu jika ada
+      commit_braille_char();
       kalimat += " ";
       Serial.printf("-> Tambah Spasi -> Kalimat: '%s'\n", kalimat.c_str());
       audio.playChar(' ');
@@ -230,7 +214,7 @@ void handle_key_action(int key_num) {
       Serial.printf("-> Mode Angka: %s\n", number_mode ? "AKTIF" : "NONAKTIF");
       break;
 
-    case 16: // S16: Tombol TTS / Suara (Baca Seluruh Kalimat via DFPlayer)
+    case 16: // S16: Tombol TTS / Suara
       Serial.printf("-> SUARA / BACA TEKS: '%s'\n", kalimat.c_str());
       audio.readSentence(kalimat);
       break;
@@ -241,15 +225,15 @@ void handle_key_action(int key_num) {
   }
 }
 
-// Fungsi Update Matrix Scanner (Dipanggil di loop utama)
+// Fungsi Update Matrix Scanner (Dipanggil di task Core 0 atau loop)
 void braille_keypad_update() {
   unsigned long now = millis();
 
   // Scan Matriks 4x4
   for (int c = 0; c < 4; c++) {
+    digitalWrite(COL_PINS[c], LOW);
     pinMode(COL_PINS[c], OUTPUT);
-    digitalWrite(COL_PINS[c], LOW); // Tarik kolom ke LOW
-    delayMicroseconds(8);           // Stabilkan sinyal kapasitansi pin
+    delayMicroseconds(35); // Beri jeda cukup agar kapasitansi jalur stabil
 
     for (int r = 0; r < 4; r++) {
       bool is_pressed = (digitalRead(ROW_PINS[r]) == LOW);
@@ -259,6 +243,8 @@ void braille_keypad_update() {
         last_key_press_time = now;
         key_state[r][c] = true;
         int key_num = (r * 4) + c + 1; // S1 sampai S16
+        Serial.printf("[KEYPAD-RAW] Ditekan: Row%d (GPIO%d) & Col%d (GPIO%d) => S%d\n",
+                      r + 1, ROW_PINS[r], c + 1, COL_PINS[c], key_num);
         handle_key_action(key_num);
       } else if (!is_pressed && key_prev_state[r][c]) {
         key_state[r][c] = false;
@@ -273,6 +259,37 @@ void braille_keypad_update() {
   if (braille_dots != 0 && (now - last_dot_time > AUTO_COMMIT_MS)) {
     commit_braille_char();
   }
+}
+
+// Task FreeRTOS Independen pada Core 0 (Scan Keypad 100x per detik)
+static void keypad_freertos_task(void *pvParameters) {
+  while (true) {
+    braille_keypad_update();
+    vTaskDelay(pdMS_TO_TICKS(10)); // Jeda 10ms
+  }
+}
+
+// Inisialisasi Pin Keypad 4x4 & Jalankan Scanner di Core 0
+void braille_keypad_init() {
+  for (int r = 0; r < 4; r++) {
+    pinMode(ROW_PINS[r], INPUT_PULLUP);
+  }
+  for (int c = 0; c < 4; c++) {
+    pinMode(COL_PINS[c], INPUT);
+  }
+
+  // Jalankan background task di Core 0 (agar tak terhalang inferensi AI di Core 1)
+  xTaskCreatePinnedToCore(
+    keypad_freertos_task,
+    "KeypadScanner",
+    3072,
+    NULL,
+    2,
+    NULL,
+    0 // Core 0
+  );
+
+  Serial.println("[BRAILLE] Keypad 4x4 Diinisialisasi di Core 0 (R: 4,5,6,7 | C: 13,16,21,47)");
 }
 
 // Tampilan Visual Braille Khusus Layar OLED

@@ -23,7 +23,7 @@
 AudioManager audio;
 
 // ─── Mode Sistem (Toggle via Tombol S1 pada Keypad) ──────────────────────────
-DeviceMode current_device_mode = MODE_AI_BISINDO;
+volatile DeviceMode current_device_mode = MODE_AI_BISINDO;
 
 // ─── Layar OLED 0.96" SSD1306 (I2C) ──────────────────────────────────────────
 #define I2C_SDA 8
