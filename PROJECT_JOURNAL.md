@@ -110,3 +110,30 @@ Dokumen ini berfungsi sebagai rekam jejak (changelog) dan dokumentasi berkelanju
   - Menambahkan state `menunggu_lepas_tangan`: satu pose hanya dapat menambahkan satu huruf. Setelah huruf tersimpan, sistem menampilkan centang dan menunggu tangan/pose hilang selama 600 ms sebelum menerima huruf berikutnya. Ini mencegah teks berulang seperti `EEEE` atau `IIII` saat pose terus ditahan.
   - Teks hasil tidak dihapus otomatis; penghapusan, spasi, dan bersihkan teks direncanakan pada tahap tombol Braille/push button.
   - Hanya firmware environment `esp32s3` perlu di-upload ulang. ESP32-CAM, model, dan wiring tidak berubah.
+
+- **[15 Oktober 2026 - PREVIEW KAMERA KE TFT ST7735S]**:
+  - Menambahkan library Adafruit ST7735 dan preview frame 96x96 grayscale ke TFT 1.77 inci (diperbesar 128x128, di tengah layar 160x128) setiap frame UART diterima, sebelum inferensi. Logika AI, OLED, UART, dan teks tidak diubah.
+  - Wiring TFT -> ESP32-S3: GND->GND, VCC->3.3V, SCK->GPIO12, SDA->GPIO11, RES->GPIO15, RS->GPIO14, CS->GPIO10, LEDA->3.3V. Pin 9-14 TFT (touch/duplikat) tidak dipakai.
+  - Mengganti kode ESP32-CAM: WiFi dan web stream dihapus; CAM hanya mengirim frame saat menerima 'C'. Preview kini lewat TFT tanpa WiFi.
+  - Jika warna/posisi TFT bergeser, coba ganti INITR_BLACKTAB dengan INITR_GREENTAB atau INITR_REDTAB di setup(). Upload kedua env (esp32s3 dan esp32cam).
+
+- **[17 Oktober 2026 - INTEGRASI DUAL DISPLAY TFT, SUARA DFPLAYER MINI, & PENYESUAIAN PIN KEYPAD BRAILLE]**:
+  - **Sinkronisasi TFT ST7735S dari Main:** Menarik kode pinning SPI TFT 1.77" dari branch `main` (SCK=GPIO12, MOSI/SDA=GPIO11, CS=GPIO10, DC/RS=GPIO14, RST/RES=GPIO15).
+  - **Resolusi Konflik Pin Keypad 4x4 Braille:** Memindahkan pin kolom keypad dari GPIO 10, 11, 12, 13 (yang bertabrakan dengan SPI TFT) ke pin GPIO aman dan bebas strapping:
+    - *Baris (Rows):* GPIO 4, 5, 6, 7 (INPUT_PULLUP)
+    - *Kolom (Cols):* GPIO 13, 16, 21, 47 (Drive LOW / High-Z)
+  - **Integrasi DFPlayer Mini + Mini Speaker 4Ω 3W (`src/s3/audio_manager.h`):**
+    - Menggunakan HardwareSerial2 ESP32-S3: TX2=GPIO1 (dihubungkan via resistor 1kΩ ke RX DFPlayer), RX2=GPIO2 (dari TX DFPlayer), BUSY=GPIO42 (status memutar audio).
+    - Menghubungkan mini speaker 4Ω 3W langsung ke pin SPK_1 dan SPK_2 pada DFPlayer Mini.
+    - Menambahkan logika pemutaran audio non-blocking untuk:
+      1. Pergantian mode sistem via tombol S1 (suara Track 50 untuk AI BISINDO, Track 51 untuk Braille).
+      2. Setiap huruf terkunci dari deteksi kamera AI BISINDO (suara alfabet Track 1-26).
+      3. Setiap huruf yang diketik via keyboard Braille fisik (suara alfabet Track 1-26 / angka Track 27-36).
+      4. Tombol kontrol S4 (Clear), S5/S13 (Backspace), S9/S14 (Spasi), dan S16 (TTS / Baca Seluruh Kalimat).
+  - **Skema Wiring Switch ON/OFF 3-Pin SPDT:**
+    - Pin 1 (IN): Input daya +5V dari Baterai / USB Power.
+    - Pin 2 (COMMON / OUT): Jalur rel daya 5V utama (menyalakan pin 5V ESP32-S3, ESP32-CAM, dan DFPlayer Mini).
+    - Pin 3: NC (Tidak terhubung) / Indikator LED opsional.
+    - Memutus daya secara fisik pada seluruh modul saat OFF untuk efisiensi baterai 0 mA quiescent.
+  - **Status Build Firmware:** Kedua target (`esp32s3` dan `esp32cam`) berhasil dikompilasi 100% SUKSES tanpa error.
+

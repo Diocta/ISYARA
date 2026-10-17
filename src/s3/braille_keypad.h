@@ -4,24 +4,27 @@
 #include <Arduino.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include "audio_manager.h"
 
 // =============================================================================
 // ISYARA - Modul Keyboard Braille 4x4 Tactile Matrix (ESP32-S3)
 // =============================================================================
 // Modul: 16 Tactile Push Button Matrix (S1 sampai S16)
 // Koneksi ke ESP32-S3: 8 Pin (4 Baris / Rows + 4 Kolom / Cols)
+// Telah disesuaikan agar TIDAK bertabrakan dengan SPI TFT ST7735S (GPIO 10,11,12,14,15)
 // =============================================================================
 
-// Pinout Default ESP32-S3 (Header Kiri / Safe GPIOs)
+// Pinout Rows (Header Kiri: Pin 4, 5, 6, 7 berurutan)
 #define KEYPAD_R1 4
 #define KEYPAD_R2 5
 #define KEYPAD_R3 6
 #define KEYPAD_R4 7
 
-#define KEYPAD_C1 10
-#define KEYPAD_C2 11
-#define KEYPAD_C3 12
-#define KEYPAD_C4 13
+// Pinout Cols (Bebas tabrakan dari TFT & strapping pins)
+#define KEYPAD_C1 13
+#define KEYPAD_C2 16
+#define KEYPAD_C3 21
+#define KEYPAD_C4 47
 
 const uint8_t ROW_PINS[4] = {KEYPAD_R1, KEYPAD_R2, KEYPAD_R3, KEYPAD_R4};
 const uint8_t COL_PINS[4] = {KEYPAD_C1, KEYPAD_C2, KEYPAD_C3, KEYPAD_C4};
@@ -115,7 +118,7 @@ void braille_keypad_init() {
   for (int c = 0; c < 4; c++) {
     pinMode(COL_PINS[c], INPUT); // High-impedance saat tidak aktif
   }
-  Serial.println("[BRAILLE] Keypad 4x4 Diinisialisasi (R: 4,5,6,7 | C: 10,11,12,13)");
+  Serial.println("[BRAILLE] Keypad 4x4 Diinisialisasi (R: 4,5,6,7 | C: 13,16,21,47)");
 }
 
 // Fungsi Commit Karakter Braille ke Kalimat
@@ -125,6 +128,8 @@ void commit_braille_char() {
     if (c != '\0' && c != '?') {
       kalimat += c;
       Serial.printf("[BRAILLE] Huruf Dikunci: '%c' (Mask: 0x%02X) -> Kalimat: %s\n", c, braille_dots, kalimat.c_str());
+      // Output suara dari DFPlayer Mini setiap huruf braille diketik
+      audio.playChar(c);
     } else {
       Serial.printf("[BRAILLE] Pola Titik Tidak Dikenal (Mask: 0x%02X)\n", braille_dots);
     }
@@ -142,9 +147,11 @@ void handle_key_action(int key_num) {
       if (current_device_mode == MODE_AI_BISINDO) {
         current_device_mode = MODE_BRAILLE;
         Serial.println("-> MODE SWITCH: BRAILLE KEYBOARD AKTIF");
+        audio.playModeChange(true);
       } else {
         current_device_mode = MODE_AI_BISINDO;
         Serial.println("-> MODE SWITCH: AI BISINDO AKTIF");
+        audio.playModeChange(false);
       }
       break;
 
@@ -165,6 +172,7 @@ void handle_key_action(int key_num) {
       kalimat = "";
       braille_dots = 0;
       Serial.println("-> HAPUS SELURUH TEKS (Clear All)");
+      audio.playClear();
       break;
 
     case 5:  // S5: Backspace (Hapus 1 Karakter Terakhir)
@@ -175,6 +183,7 @@ void handle_key_action(int key_num) {
       } else if (kalimat.length() > 0) {
         kalimat.remove(kalimat.length() - 1);
         Serial.printf("-> Backspace: %s\n", kalimat.c_str());
+        audio.playBackspace();
       }
       break;
 
@@ -201,6 +210,7 @@ void handle_key_action(int key_num) {
       commit_braille_char(); // Commit huruf sebelumnya dulu jika ada
       kalimat += " ";
       Serial.printf("-> Tambah Spasi -> Kalimat: '%s'\n", kalimat.c_str());
+      audio.playChar(' ');
       break;
 
     case 10: // Titik 3 (Kiri Bawah)
@@ -220,8 +230,9 @@ void handle_key_action(int key_num) {
       Serial.printf("-> Mode Angka: %s\n", number_mode ? "AKTIF" : "NONAKTIF");
       break;
 
-    case 16: // S16: Tombol TTS / Suara (Siap untuk modul DFPlayer)
+    case 16: // S16: Tombol TTS / Suara (Baca Seluruh Kalimat via DFPlayer)
       Serial.printf("-> SUARA / BACA TEKS: '%s'\n", kalimat.c_str());
+      audio.readSentence(kalimat);
       break;
 
     default:
@@ -277,9 +288,6 @@ void render_braille_oled(Adafruit_SSD1306 &display) {
   else display.print("[A-Z]");
 
   // 2. Visualisasi 6 Titik Braille (2x3 Grid) di Sisi Kiri Layar
-  // Titik 1 (x:10, y:14) | Titik 4 (x:26, y:14)
-  // Titik 2 (x:10, y:25) | Titik 5 (x:26, y:25)
-  // Titik 3 (x:10, y:36) | Titik 6 (x:26, y:36)
   int dot_coords[6][2] = {
     {10, 14}, // Titik 1
     {10, 25}, // Titik 2
