@@ -77,6 +77,7 @@ enum DeviceMode {
 extern DeviceMode current_device_mode;
 extern String kalimat;
 extern bool tft_butuh_update_mode;
+extern void perbarui_oled_seketika();
 
 // Fungsi Dekoder Braille (Mask 6-bit -> Karakter ASCII)
 char decode_braille_to_char(uint8_t mask, bool is_num) {
@@ -165,8 +166,12 @@ void commit_braille_char() {
 void handle_key_action(int key_num) {
   Serial.printf("[KEYPAD] Tombol S%d Ditekan! ", key_num);
 
-  // Jika sedang di mode AI BISINDO dan tombol pengetikan ditekan, otomatis beralih ke Braille mode
-  if (key_num != 1 && current_device_mode != MODE_BRAILLE) {
+  // Hanya tombol titik Braille (S2, S3, S6, S7, S10, S11) yang memicu auto-switch ke Mode Braille.
+  // Tombol fungsi utilitas (Spasi, Backspace, Clear, TTS) tetap bekerja pada mode aktif saat ini.
+  bool is_braille_dot = (key_num == 2 || key_num == 3 || key_num == 6 || 
+                         key_num == 7 || key_num == 10 || key_num == 11);
+
+  if (is_braille_dot && current_device_mode != MODE_BRAILLE) {
     current_device_mode = MODE_BRAILLE;
     tft_butuh_update_mode = true;
     Serial.print("[AUTO SWITCH KE BRAILLE MODE] ");
@@ -214,19 +219,21 @@ void handle_key_action(int key_num) {
       braille_dots = 0;
       Serial.println("-> HAPUS SELURUH TEKS (Clear All)");
       audio.playClear();
+      perbarui_oled_seketika();
       break;
 
     case 5:  // S5: Backspace (Hapus 1 Karakter Terakhir)
     case 13: // S13: Alternatif Backspace (Pojok Kiri Bawah)
       snprintf(last_key_badge, sizeof(last_key_badge), (key_num == 5) ? "S5:BKSP" : "S13:BKSP");
       last_key_badge_time = millis();
-      if (braille_dots != 0) {
+      if (current_device_mode == MODE_BRAILLE && braille_dots != 0) {
         braille_dots = 0;
         Serial.println("-> Batalkan Titik Aktif");
       } else if (kalimat.length() > 0) {
         kalimat.remove(kalimat.length() - 1);
         Serial.printf("-> Backspace: %s\n", kalimat.c_str());
         audio.playBackspace();
+        perbarui_oled_seketika();
       }
       break;
 
@@ -258,10 +265,13 @@ void handle_key_action(int key_num) {
     case 14: // S14: Alternatif Spasi (Baris Bawah)
       snprintf(last_key_badge, sizeof(last_key_badge), (key_num == 9) ? "S9:SPASI" : "S14:SPASI");
       last_key_badge_time = millis();
-      commit_braille_char();
+      if (current_device_mode == MODE_BRAILLE) {
+        commit_braille_char();
+      }
       kalimat += " ";
       Serial.printf("-> Tambah Spasi -> Kalimat: '%s'\n", kalimat.c_str());
       audio.playChar(' ');
+      perbarui_oled_seketika();
       break;
 
     case 10: // S10: Titik 3 (Kiri Bawah)

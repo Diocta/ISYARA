@@ -193,8 +193,25 @@ Dokumen ini berfungsi sebagai rekam jejak (changelog) dan dokumentasi berkelanju
       - Padahal library `Adafruit_SPITFT` mengendalikan pin CS secara manual (*software GPIO*) menggunakan `digitalWrite(_cs, LOW)` dan `digitalWrite(_cs, HIGH)`.
       - Karena GPIO 10 terkunci ke periferal SPI, fungsi `digitalWrite(_cs, LOW)` tidak mampu menarik pin CS ke LOW (pin tertahan HIGH terus-menerus). Akibatnya, chip ST7735 mengabaikan seluruh transmisi data SPI dan layar tetap putih polos.
       - **Solusi:** Menggunakan objek SPI global `&SPI`, membebaskan pin CS dengan mengoper `ss = -1` pada `SPI.begin(TFT_SCK, -1, TFT_MOSI, -1)`, menetapkan pin CS, DC, RST sebagai OUTPUT manual, menurunkan kecepatan SPI ke **16 MHz** (standar aman ST7735), serta menambahkan tes kilatan layar biru (*blue flash test*) 80ms saat *booting* untuk konfirmasi visual penerimaan data SPI.
+- **[19 Oktober 2026 - OPTIMASI FULL-SCREEN VIEWFINDER TFT 160x128 & FITUR TOMBOL SPASI/BACKSPACE MODE AI]**:
+  - **Penyelesaian Masalah Tabrakan Layar Kamera & Braille pada TFT:**
+    - **Akar Masalah:** Citra kamera 96x96 sebelumnya hanya diskalakan ke ukuran 128x128 dan digambar pada koordinat (x=16, y=0). Pada panel ST7735S yang beresolusi 160x128, area selebar 16 piksel di sisi kiri (x=0..15) dan kanan (x=144..159) tidak tertutup oleh gambar kamera. Akibatnya, sisa teks standby dan artefak elemen visual dari Mode Braille sebelumnya tertinggal di pinggiran layar sehingga bertabrakan dengan tampilan kamera.
+    - **Solusi Full-Screen 160x128:**
+      - Mengubah buffer `tft_buffer` menjadi `160 * 128` (40 KB).
+      - Menulis ulang fungsi `tampilkan_preview_tft()` agar menskalakan citra 96x96 grayscale menjadi **160x128 RGB565 Full-Screen (Edge-to-Edge)** dari koordinat (0,0). Viewfinder kamera kini memenuhi 100% seluruh panel LCD tanpa celah pinggiran.
+      - Pada transisi dari Mode Braille kembali ke Mode AI Kamera, layar TFT dieksekusi pembersihan total `tft.fillScreen(ST77XX_BLACK)` untuk menjamin kanvas bersih.
+  - **Integrasi Tombol Spasi, Backspace, Clear, dan TTS pada Mode AI Kamera:**
+    - **Akar Masalah:** Logika `handle_key_action` sebelumnya langsung mengeksekusi *auto-switch* ke Mode Braille jika ada tombol selain S1 yang ditekan. Hal ini menyebabkan penekanan tombol Spasi (S9) atau Backspace (S5) di Mode AI Kamera langsung memaksa sistem berpindah ke Mode Braille.
+    - **Solusi Keypad Multi-Mode yang Presisi:**
+      - Mengisolasi *auto-switch* hanya untuk penekanan **6 titik Braille fisik (S2, S3, S6, S7, S10, S11)**.
+      - Mengaktifkan tombol utilitas pada Mode AI BISINDO:
+        1. **Tombol Spasi (S9 & S14):** Menambahkan spasi `' '` pada kalimat, memutar suara klik spasi DFPlayer, dan tetap berada pada Mode AI Kamera.
+        2. **Tombol Backspace (S5 & S13):** Menghapus satu karakter terakhir pada kalimat, memutar suara backspace DFPlayer, dan tetap berada pada Mode AI Kamera.
+        3. **Tombol Clear All (S4):** Mengosongkan seluruh kalimat, memutar suara clear, dan tetap berada pada Mode AI Kamera.
+        4. **Tombol TTS (S16):** Membacakan seluruh kalimat yang telah dirangkai melalui speaker DFPlayer Mini tanpa berpindah mode.
+      - Membuat fungsi `perbarui_oled_seketika()` agar tampilan teks pada layar OLED SSD1306 seketika diperbarui secara instan (latensi 0ms) saat tombol spasi, backspace, atau clear ditekan.
   - **Status Kompilasi Final (Build Verification):**
-    - Environment `esp32s3`: **SUCCESS** (Flash: 16.1%, RAM: 19.4%).
-    - Environment `esp32cam`: **SUCCESS** (Flash: 11.1%, RAM: 8.0%).
+    - Environment `esp32s3`: **SUCCESS** (RAM 21.9%, Flash 16.1%).
+
 
 

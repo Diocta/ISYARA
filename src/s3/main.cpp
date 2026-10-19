@@ -42,11 +42,11 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define TFT_DC   14
 #define TFT_RST  15
 
-#define TFT_PREVIEW_SIZE 128
-#define TFT_PREVIEW_X    16
+#define TFT_WIDTH  160
+#define TFT_HEIGHT 128
 Adafruit_ST7735 tft(&SPI, TFT_CS, TFT_DC, TFT_RST);
 bool tft_siap = false;
-uint16_t tft_buffer[TFT_PREVIEW_SIZE * TFT_PREVIEW_SIZE];
+uint16_t tft_buffer[TFT_WIDTH * TFT_HEIGHT];
 
 // ─── Komunikasi Serial1 UART ke ESP32-CAM ───────────────────────────────────
 #define RX_CAM   18
@@ -151,20 +151,22 @@ bool minta_dan_baca_frame() {
   return false;
 }
 
-// ─── Tampilkan Frame Kamera 96x96 ke TFT LCD ST7735S ─────────────────────────
+// ─── Tampilkan Frame Kamera 96x96 ke Full-Screen TFT LCD ST7735S 160x128 ──────
 void tampilkan_preview_tft() {
   if (!tft_siap) return;
 
-  // Skalakan citra 96x96 grayscale menjadi 128x128 RGB565 (nearest-neighbor)
-  for (int y = 0; y < TFT_PREVIEW_SIZE; y++) {
-    const uint8_t *baris = &img_buffer[(y * 96 / TFT_PREVIEW_SIZE) * 96];
-    uint16_t *keluaran = &tft_buffer[y * TFT_PREVIEW_SIZE];
-    for (int x = 0; x < TFT_PREVIEW_SIZE; x++) {
-      uint8_t g = baris[x * 96 / TFT_PREVIEW_SIZE];
+  // Skalakan citra 96x96 grayscale menjadi 160x128 RGB565 full-screen (edge-to-edge)
+  for (int y = 0; y < TFT_HEIGHT; y++) {
+    int src_y = (y * 3) / 4; // 96 / 128
+    const uint8_t *baris = &img_buffer[src_y * 96];
+    uint16_t *keluaran = &tft_buffer[y * TFT_WIDTH];
+    for (int x = 0; x < TFT_WIDTH; x++) {
+      int src_x = (x * 3) / 5; // 96 / 160
+      uint8_t g = baris[src_x];
       keluaran[x] = ((g & 0xF8) << 8) | ((g & 0xFC) << 3) | (g >> 3);
     }
   }
-  tft.drawRGBBitmap(TFT_PREVIEW_X, 0, tft_buffer, TFT_PREVIEW_SIZE, TFT_PREVIEW_SIZE);
+  tft.drawRGBBitmap(0, 0, tft_buffer, TFT_WIDTH, TFT_HEIGHT);
 }
 
 // ─── Tampilan Layar Standby/Startup pada TFT LCD ST7735S ─────────────────────
@@ -270,6 +272,13 @@ void update_layar_oled(String prediksi, float akurasi, int progress_persen,
   display.display();
 }
 
+// ─── Refresh Cepat Layar OLED saat Tombol Spasi / Backspace Ditekan ──────────
+void perbarui_oled_seketika() {
+  if (current_device_mode == MODE_AI_BISINDO) {
+    update_layar_oled(huruf_terakhir, 0.0f, 0, false);
+  }
+}
+
 // ─── Setup ───────────────────────────────────────────────────────────────────
 void setup() {
   Serial.begin(115200);
@@ -357,9 +366,9 @@ void loop() {
     return;
   }
 
-  // Jika baru saja beralih dari Mode Braille ke Mode AI BISINDO, refresh tampilan standby TFT
+  // Jika baru saja beralih dari Mode Braille ke Mode AI BISINDO, bersihkan layar TFT secara total
   if (tft_butuh_update_mode) {
-    tampilkan_standby_tft();
+    tft.fillScreen(ST77XX_BLACK);
     tft_butuh_update_mode = false;
   }
 
