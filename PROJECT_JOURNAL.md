@@ -212,23 +212,23 @@ Dokumen ini berfungsi sebagai rekam jejak (changelog) dan dokumentasi berkelanju
       - Membuat fungsi `perbarui_oled_seketika()` agar tampilan teks pada layar OLED SSD1306 seketika diperbarui secara instan (latensi 0ms) saat tombol spasi, backspace, atau clear ditekan.
   - **Status Kompilasi Final (Build Verification):**
     - Environment `esp32s3`: **SUCCESS** (RAM 21.9%, Flash 16.1%).
-- **[19 Oktober 2026 - IMPLEMENTASI SISTEM SMART TTS HYBRID & GENERASI ASET AUDIO DFPLAYER MINI]**:
-  - **Generasi Aset Suara Otomatis (`tools/generate_audio_assets.py`):**
-    - Berhasil membuat **112 file audio MP3** Bahasa Indonesia berkualitas tinggi menggunakan Google TTS dan menyimpannya langsung ke direktori `E:/mp3/` pada kartu MicroSD FAT32 (serta salinan cadangan pada `audio_assets/mp3/`).
-    - Daftar trek audio mencakup:
-      1. Alfabet A–Z (Track 0001–0026) dengan pelafalan fonetik bahasa Indonesia yang jelas.
-      2. Angka 0–9 (Track 0027–0036).
-      3. Suara Sistem (Track 0040–0099: Spasi, Hapus, Hapus Semua, Mode Switch BISINDO, Mode Switch Braille, dan Startup).
-      4. Kosa Kata Esensial & Frasa Medis/Harian (Track 0101–0170: "Saya", "Kamu", "Makan", "Minum", "Tolong", "Terima Kasih", "Rumah Sakit", "Kamar Mandi", dll.).
-  - **Kamus Kosa Kata Pintar (`src/s3/word_dictionary.h`):**
-    - Mengintegrasikan kamus kata kunci dan frasa bahasa Indonesia dengan pemetaan nomor trek audio ke memori Flash ESP32-S3.
-  - **Peningkatan Engine Suara (`src/s3/audio_manager.h`):**
-    - Mengembangkan fungsi `readSentence(kalimat)` dengan arsitektur **Hybrid Smart TTS**:
-      1. Jika mendeteksi frasa atau kata yang ada di kamus, sistem memutar suara utuh dari kata tersebut secara natural.
-      2. Jika mendeteksi kata yang tidak terdaftar (nama orang / singkatan seperti "ABC" atau "ADAM"), sistem otomatis mengeja huruf per huruf (*Spelling Mode*).
-    - Menerapkan fungsi `playAndWait()` berbasis *hardware feedback* pin `DF_BUSY_PIN` (GPIO 42) dengan *fallback timeout* untuk menjamin kalimat dibacakan secara berurutan dan natural tanpa terpotong.
-  - **Status Kompilasi Firmware:**
-    - Environment `esp32s3`: **SUCCESS 100%** (RAM 21.9%, Flash 16.2%).
+- **[20 Oktober 2026 - UPGRADE SAMPLING SUARA KE MICROSOFT AZURE NEURAL TTS & SINKRONISASI MICROSD D:\MP3]**:
+  - **Sinkronisasi Kode Rekan Tim dari GitHub:**
+    - Menarik (*git pull*) commit terbaru dari branch `feature/braille-keyboard` yang menambahkan struktur DFPlayer Mini, kamus kosa kata `src/s3/word_dictionary.h`, dan engine `src/s3/audio_manager.h`.
+  - **Transisi Sampling dari Google TTS ke Microsoft Azure Neural Studio TTS:**
+    - **Akar Masalah Suara Lama:** Sampling suara Google TTS (`gTTS`) terdengar kaku, bernada robotik/monoton, serta memiliki resolusi audio rendah dengan artefak kompresi yang terdengar cempreng pada speaker 3W.
+    - **Solusi Suara Profesional:** Mengalihkan engine generator audio ke **Microsoft Azure Neural TTS (`id-ID-GadisNeural`)** via library `edge-tts`.
+    - Karakteristik suara baru:
+      1. Kualitas studio broadcast dengan intonasi natural, artikulatif, hangat, dan jernih.
+      2. Format frame MP3 24 kHz yang 100% kompatibel secara hardware dengan decoder DAC DFPlayer Mini (YX5200/GD3200).
+      3. Pelafalan fonetik huruf A–Z, angka 0–9, suara sistem, dan 60 kosa kata esensial terdengar sangat tegas dan jelas bagi pengguna disabilitas.
+  - **Pembaruan Script Generator (`tools/generate_audio_assets.py`):**
+    - Mendukung deteksi otomatis drive kartu memori (`D:/mp3` atau `E:/mp3`) serta argumen `--sd-dir` dan `--voice`.
+    - Menuliskan output secara simultan ke folder MicroSD reader `D:\mp3` dan folder cadangan repositori `audio_assets/mp3/`.
+  - **Eksekusi & Sinkronisasi Hardware:**
+    - Berhasil membuat dan memperbarui seluruh **112 file audio MP3** (`0001.mp3` s.d. `0170.mp3`) langsung ke dalam kartu MicroSD di drive `D:\mp3` dan direktori proyek.
+    - Seluruh sampel lama telah digantikan 100% dengan sampel neural studio yang profesional.
+
 
 
 
