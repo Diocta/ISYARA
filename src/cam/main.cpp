@@ -89,6 +89,13 @@ void setup() {
     s->set_gainceiling(s, (gainceiling_t)2); // Batasi gain agar tidak muncul bintik noise
     s->set_framesize(s, FRAMESIZE_96X96);
   }
+
+  // Buang 3 frame awal agar Auto Exposure & White Balance sensor stabil sebelum trigger pertama
+  for (int i = 0; i < 3; i++) {
+    camera_fb_t * fb = esp_camera_fb_get();
+    if (fb) esp_camera_fb_return(fb);
+    delay(40);
+  }
 }
 
 void loop() {

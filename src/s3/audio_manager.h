@@ -135,6 +135,19 @@ public:
     }
   }
 
+  // Bunyikan kata penuh langsung dari kamus audio kosa kata (Non-blocking)
+  void playWord(const String &word) {
+    int track = cariTrackKata(word);
+    if (track > 0) {
+      playTrack(track);
+    } else {
+      // Jika kata belum ada di kamus audio, bunyikan huruf pertamanya
+      if (word.length() > 0) {
+        playChar(word.charAt(0));
+      }
+    }
+  }
+
   void playModeChange(bool to_braille) {
     playTrack(to_braille ? AUDIO_TRACK_MODE_BRAILLE : AUDIO_TRACK_MODE_AI);
   }

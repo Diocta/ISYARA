@@ -229,6 +229,21 @@ Dokumen ini berfungsi sebagai rekam jejak (changelog) dan dokumentasi berkelanju
     - Berhasil membuat dan memperbarui seluruh **112 file audio MP3** (`0001.mp3` s.d. `0170.mp3`) langsung ke dalam kartu MicroSD di drive `D:\mp3` dan direktori proyek.
     - Seluruh sampel lama telah digantikan 100% dengan sampel neural studio yang profesional.
 
+- **[22 Oktober 2026 - ELIMINASI BUG DETEKSI FALSE POSITIVE HURUF 'E' SAAT BOOT-UP & FILTER FRAME KOSONG]**:
+  - **Investigasi Akar Masalah Deteksi Huruf 'E' Saat Booting:**
+    - **Akar Masalah 1 (Model Softmax Tanpa Kelas Latar):** Model inferensi yang saat ini terpasang (`BISINDO_inferencing`) hanya memiliki 9 kelas huruf (A–I) tanpa kelas `idle` atau `background`. Ketika kamera baru dinyalakan dan menghadap ke meja/dinding kosong atau kondisi minim cahaya, distribusi softmax tetap dipaksa bernilai 1.0. Citra gelap/flat tanpa tangan tersebut secara statistik menghasilkan probabilitas terbesar pada kelas 'E' (~55–65%).
+    - **Akar Masalah 2 (Ketiadaan Jeda Stabilisasi Sensor):** Sensor kamera OV3660 memerlukan waktu sekitar 1–2 detik setelah *power-on* untuk mengkalibrasi Auto Exposure Control (AEC) dan Auto White Balance (AWB). Selama periode ini, frame citra awal yang belum stabil langsung dibaca oleh ESP32-S3 dan ditahan (*hold*) selama 1.2 detik sehingga langsung mengunci huruf 'E' ke dalam kalimat dan memutar suaranya.
+  - **Solusi Komprehensif:**
+    1. **Boot Warm-up Grace Period (`BOOT_WARMUP_MS = 3500`):**
+       - Selama 3.5 detik pertama sejak booting, akumulasi durasi penguncian pose dinonaktifkan (`best_label = "-"` dan `waktu_deteksi_mulai = millis()`). Buffer kalimat dijamin tetap bersih (`kalimat = ""`).
+    2. **Deteksi Frame Kosong Berbasis Dynamic Range Kontras:**
+       - Menghitung rentang piksel (`max_px - min_px`) dan rata-rata kecerahan (`avg_px`) pada buffer 9216 byte. Jika rentang kontras < 35 atau kecerahan < 18 (frame gelap/flat tanpa objek tangan di depan lensa), sistem otomatis menolak frame sebagai `best_label = "-"`.
+    3. **Peningkatan Ambang Batas Keyakinan (`CONFIDENCE_THRESHOLD = 0.70f`):**
+       - Menaikkan ambang batas minimal dari 0.55 ke 0.70 (70%) agar fluktuasi noise latar belakang tidak dapat memicu penguncian huruf.
+    4. **Frame Flushing pada ESP32-CAM (`src/cam/main.cpp`):**
+       - Membuang 3 frame awal pada `setup()` kamera agar exposure sensor stabil sebelum menerima trigger `'C'` pertama dari Master.
+
+
 
 
 

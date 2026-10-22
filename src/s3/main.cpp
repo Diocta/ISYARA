@@ -75,7 +75,8 @@ bool          menunggu_lepas_tangan = false;
 const unsigned long HOLD_TIME_MS      = 1200; // Tahan pose 1.2 detik untuk mengunci huruf
 const unsigned long RELEASE_TIME_MS   =  600; // Lepas tangan sebelum mendeteksi huruf berikutnya
 const unsigned long CHECKMARK_TIME_MS = 1000; // Durasi ikon centang setelah huruf tersimpan
-const float         CONFIDENCE_THRESHOLD = 0.55f; // Ambang batas keyakinan minimal model (55%)
+const unsigned long BOOT_WARMUP_MS    = 3500; // Jeda stabilisasi awal 3.5 detik (anti false-positive saat boot)
+const float         CONFIDENCE_THRESHOLD = 0.70f; // Ambang batas keyakinan minimal model (70% agar stabil)
 
 // ─── PSRAM-aware calloc untuk TensorFlow Lite Micro ──────────────────────────
 void *ei_calloc(size_t nitems, size_t size) {
@@ -235,15 +236,28 @@ void update_layar_oled(String prediksi, float akurasi, int progress_persen,
     display.print("Idle");
   }
 
-  // Baris 2: Huruf prediksi besar (Font Size 2)
+  // Baris 2: Pose prediksi (Font Size 2 jika <= 3 huruf, Font Size 1 jika kata panjang)
   display.setCursor(0, 16);
   display.setTextSize(1);
   display.print("Pose: ");
-  display.setTextSize(2);
-  display.print(prediksi);
-  display.setTextSize(1);
+  String pose_tampil = prediksi;
+  pose_tampil.replace('_', ' ');
 
-  // Status Kunci di kanan huruf
+  if (pose_tampil.length() <= 3) {
+    display.setTextSize(2);
+    display.print(pose_tampil);
+    display.setTextSize(1);
+  } else {
+    // Kata (MAKAN, MINUM, TIDUR, SAYA, TOLONG, TERIMA KASIH)
+    display.setTextSize(1);
+    if (pose_tampil.length() > 8) {
+      display.print(pose_tampil.substring(0, 7) + ".");
+    } else {
+      display.print(pose_tampil);
+    }
+  }
+
+  // Status Kunci di kanan pose
   display.setCursor(76, 18);
   if (centang_aktif) {
     display.print("[KUNCI]");
@@ -403,6 +417,36 @@ void loop() {
                       best_label.equalsIgnoreCase("none"));
       if (is_idle) { best_label = "-"; best_value = 0.0f; }
 
+      // 1. Cek Dynamic Range & Kontras Frame (Cegah false-positive jika kamera menghadap meja/dinding kosong)
+      uint8_t min_px = 255;
+      uint8_t max_px = 0;
+      uint32_t sum_px = 0;
+      const int sample_step = 16;
+      const int sample_count = IMG_SIZE / sample_step;
+
+      for (int i = 0; i < IMG_SIZE; i += sample_step) {
+        uint8_t p = img_buffer[i];
+        if (p < min_px) min_px = p;
+        if (p > max_px) max_px = p;
+        sum_px += p;
+      }
+      uint8_t avg_px = sum_px / sample_count;
+      uint8_t dynamic_range = max_px - min_px;
+
+      // Jika kontras terlalu seragam (< 35) atau terlalu gelap (< 18), berarti tidak ada tangan di depan lensa
+      if (dynamic_range < 35 || avg_px < 18) {
+        best_label = "-";
+        best_value = 0.0f;
+      }
+
+      // 2. Proteksi Boot Warm-up: Abaikan deteksi selama 3.5 detik pertama saat boot
+      if (millis() < BOOT_WARMUP_MS) {
+        best_label = "-";
+        best_value = 0.0f;
+        waktu_deteksi_mulai = millis();
+        kalimat = ""; // Jamin buffer kalimat bersih saat startup
+      }
+
       int progress = 0;
       bool prediksi_valid = (best_value >= CONFIDENCE_THRESHOLD);
 
@@ -433,19 +477,36 @@ void loop() {
           unsigned long durasi = millis() - waktu_deteksi_mulai;
           progress = min(100, (int)((durasi * 100) / HOLD_TIME_MS));
 
-          // Kunci huruf ketika durasi penahanan pose mencapai batas (1.2 detik)
+          // Kunci isyarat ketika durasi penahanan pose mencapai batas (1.2 detik)
           if (durasi >= HOLD_TIME_MS) {
-            kalimat               += best_label;
+            bool is_word = (best_label.length() > 1);
+
+            if (is_word) {
+              // Jika kata: tambahkan spasi pemisah sebelum kata jika belum ada
+              if (kalimat.length() > 0 && !kalimat.endsWith(" ")) {
+                kalimat += " ";
+              }
+              String kata_bersih = best_label;
+              kata_bersih.replace('_', ' ');
+              kalimat += kata_bersih;
+              kalimat += " "; // Berikan spasi penutup otomatis
+            } else {
+              // Karakter tunggal (A-Z, 0-9)
+              kalimat += best_label;
+            }
+
             huruf_terkunci         = best_label;
             menunggu_lepas_tangan  = true;
             waktu_huruf_terkunci   = millis();
             progress               = 100;
 
-            Serial.printf("[AI BISINDO] Huruf Terkunci: %s -> Kalimat: %s\n",
+            Serial.printf("[AI BISINDO] Isyarat Terkunci: %s -> Kalimat: %s\n",
                           best_label.c_str(), kalimat.c_str());
 
             // Output suara via DFPlayer Mini
-            if (best_label.length() > 0) {
+            if (is_word) {
+              audio.playWord(best_label);
+            } else if (best_label.length() == 1) {
               audio.playChar(best_label.charAt(0));
             }
           }

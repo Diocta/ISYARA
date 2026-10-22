@@ -42,7 +42,16 @@ def upload_batch(file_paths, label, is_training=True):
             for fp in opened_fps:
                 fp.close()
 
+import argparse
+
 def main():
+    parser = argparse.ArgumentParser(description="Upload dataset BISINDO ke Edge Impulse")
+    parser.add_argument("--words-only", action="store_true",
+                        help="Hanya upload 7 kelas kata baru (SAYA, MAKAN, MINUM, TIDUR, TOLONG, TERIMA_KASIH, HALO)")
+    parser.add_argument("--classes", nargs="+", default=None,
+                        help="Daftar nama kelas spesifik yang ingin diunggah")
+    args = parser.parse_args()
+
     print("=" * 65)
     print("  ISYARA - UPLOAD KE EDGE IMPULSE v2 (CLASSIFICATION)")
     print("=" * 65)
@@ -58,7 +67,15 @@ def main():
 
     subfolders = sorted([d for d in os.listdir(DATASET_ROOT)
                          if os.path.isdir(os.path.join(DATASET_ROOT, d))])
-    print(f"\nDitemukan {len(subfolders)} kelas: {', '.join(subfolders)}\n")
+
+    if args.words_only:
+        word_set = {"SAYA", "MAKAN", "MINUM", "TIDUR", "TOLONG", "TERIMA_KASIH", "HALO"}
+        subfolders = [d for d in subfolders if d in word_set]
+    elif args.classes:
+        target_set = set(args.classes)
+        subfolders = [d for d in subfolders if d in target_set]
+
+    print(f"\nKelas yang akan diunggah ({len(subfolders)} kelas): {', '.join(subfolders)}\n")
 
     total_ok = 0
     total_fail = 0

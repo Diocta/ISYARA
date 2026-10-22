@@ -14,6 +14,7 @@ struct WordEntry {
 const WordEntry WORD_DICTIONARY[] = {
   // Frasa multi-kata (dicek lebih dulu)
   {"TERIMA KASIH", 112},
+  {"TERIMA_KASIH", 112},
   {"SAMA-SAMA",    113},
   {"SAMA SAMA",    113},
   {"SELAMAT PAGI", 116},
@@ -24,6 +25,7 @@ const WordEntry WORD_DICTIONARY[] = {
 
   // Kata tunggal
   {"SAYA",    101},
+  {"AKU",     101},
   {"KAMU",    102},
   {"DIA",     103},
   {"KITA",    104},
