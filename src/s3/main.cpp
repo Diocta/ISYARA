@@ -44,6 +44,13 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 #define TFT_WIDTH  160
 #define TFT_HEIGHT 128
+
+// ─── Orientasi Rotasi Layar LCD TFT 1.77" ST7735S ────────────────────────────
+// Rotation 1 (Landscape normal): Digunakan pada Mode Kamera AI BISINDO (posisi benar)
+// Rotation 3 (Landscape rotasi 180°): Digunakan pada Mode Braille agar tampilan tidak terbalik
+#define TFT_ROTATION_CAMERA   1
+#define TFT_ROTATION_BRAILLE  3
+
 Adafruit_ST7735 tft(&SPI, TFT_CS, TFT_DC, TFT_RST);
 bool tft_siap = false;
 uint16_t tft_buffer[TFT_WIDTH * TFT_HEIGHT];
@@ -312,6 +319,7 @@ void setup() {
     Serial.println("OLED SSD1306 Gagal Diinisialisasi!");
   } else {
     display.clearDisplay();
+    display.setTextWrap(false);
     display.setTextSize(1);
     display.setTextColor(WHITE);
     display.setCursor(0, 8);
@@ -345,7 +353,7 @@ void setup() {
   // Inisialisasi kontroler ST7735S (128x160 Blacktab)
   tft.initR(INITR_BLACKTAB);
   tft.setSPISpeed(16000000); // 16 MHz stabil untuk ST7735S
-  tft.setRotation(1);
+  tft.setRotation(TFT_ROTATION_CAMERA);
 
   // Flash test: Tampilkan biru 80ms untuk verifikasi visual bahwa sinyal SPI diterima
   tft.fillScreen(ST77XX_BLUE);
@@ -371,6 +379,9 @@ void loop() {
 
   // [2] Mode Braille: Monitoring Utama pada TFT & Dashboard Telemetry pada OLED
   if (current_device_mode == MODE_BRAILLE) {
+    if (tft_butuh_update_mode) {
+      tft.setRotation(TFT_ROTATION_BRAILLE); // Rotasi 180° agar posisi layar tidak terbalik saat memakai keypad Braille
+    }
     render_braille_tft(tft, tft_butuh_update_mode);
     if (tft_butuh_update_mode) {
       tft_butuh_update_mode = false;
@@ -380,8 +391,9 @@ void loop() {
     return;
   }
 
-  // Jika baru saja beralih dari Mode Braille ke Mode AI BISINDO, bersihkan layar TFT secara total
+  // Jika baru saja beralih dari Mode Braille ke Mode AI BISINDO, kembalikan rotasi kamera & bersihkan layar TFT
   if (tft_butuh_update_mode) {
+    tft.setRotation(TFT_ROTATION_CAMERA); // Kembalikan ke orientasi normal untuk viewfinder kamera
     tft.fillScreen(ST77XX_BLACK);
     tft_butuh_update_mode = false;
   }

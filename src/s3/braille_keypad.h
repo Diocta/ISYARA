@@ -507,20 +507,21 @@ void render_braille_tft(Adafruit_ST7735 &tft, bool force_redraw) {
 // Menampilkan Status Hardware, Kamera Sleep/Dingin, Statistik Kata, & Panduan Tombol
 void render_braille_oled_dashboard(Adafruit_SSD1306 &display) {
   display.clearDisplay();
+  display.setTextWrap(false); // Cegah teks panjang membungkus (wrapping) ke baris bawahnya
 
   // 1. Header Bar
   display.setTextSize(1);
   display.setTextColor(WHITE);
   display.setCursor(0, 0);
-  display.print("ISYARA | SYSTEM DASH");
-  display.drawFastHLine(0, 10, 128, WHITE);
+  display.print("ISYARA - SYSTEM DASH");
+  display.drawFastHLine(0, 9, 128, WHITE);
 
-  // 2. Status ESP32-CAM (Konfirmasi Pengguna: Sensor Dimatikan & Bebas Overheat)
-  display.setCursor(0, 14);
-  display.print("Kamera : SLEEP [DINGIN]");
+  // 2. Status ESP32-CAM (Kamera dimatikan agar hemat daya dan dingin)
+  display.setCursor(0, 13);
+  display.print("Kamera : SLEEP [OFF]");
 
   // 3. Statistik Pengetikan
-  display.setCursor(0, 25);
+  display.setCursor(0, 24);
   int kata_count = 0;
   bool in_word = false;
   for (unsigned int i = 0; i < kalimat.length(); i++) {
@@ -531,16 +532,16 @@ void render_braille_oled_dashboard(Adafruit_SSD1306 &display) {
       in_word = false;
     }
   }
-  display.printf("Teks   : %d Kata (%d Hrf)", kata_count, kalimat.length());
+  display.printf("Teks   : %d Kata (%dH)", kata_count, (int)kalimat.length());
 
-  // 4. Status Modul Suara / DFPlayer Mini
-  display.setCursor(0, 36);
-  display.print("Audio  : SIAP (Vol 24/30)");
+  // 4. Status Modul Suara / DFPlayer Mini (muat dalam 21 karakter lebar layar)
+  display.setCursor(0, 35);
+  display.print("Audio  : SIAP (Vol 24)");
 
-  // 5. Divider Bawah & Petunjuk Cepat
-  display.drawFastHLine(0, 48, 128, WHITE);
-  display.setCursor(0, 53);
-  display.print("[S1] Kamera  [S16] TTS");
+  // 5. Divider Bawah & Petunjuk Cepat Tombol
+  display.drawFastHLine(0, 47, 128, WHITE);
+  display.setCursor(0, 52);
+  display.print("[S1]Kamera  [S16]TTS");
 
   display.display();
 }
