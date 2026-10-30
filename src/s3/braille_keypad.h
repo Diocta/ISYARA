@@ -7,6 +7,14 @@
 #include <Adafruit_ST7735.h>
 #include "audio_manager.h"
 
+// Deklarasi maju softap_add_event (didefinisikan di softap_server.h)
+// Stubs akan aktif jika ENABLE_SOFTAP tidak didefinisikan
+#ifndef ENABLE_SOFTAP
+  inline void softap_add_event(const char*, const char*) {}
+#else
+  void softap_add_event(const char* source, const char* message);
+#endif
+
 // =============================================================================
 // ISYARA - Modul Keyboard Braille 4x4 Tactile Matrix (ESP32-S3)
 // =============================================================================
@@ -155,6 +163,9 @@ void commit_braille_char() {
       kalimat += c;
       Serial.printf("[BRAILLE] Huruf Dikunci: '%c' (Mask: 0x%02X) -> Kalimat: %s\n", c, braille_dots, kalimat.c_str());
       audio.playChar(c);
+      // Catat event ke SoftAP Dashboard log
+      char ch_str[3] = {c, '\0', '\0'};
+      softap_add_event("Keyboard Braille", ch_str);
     } else {
       Serial.printf("[BRAILLE] Pola Titik Tidak Dikenal (Mask: 0x%02X)\n", braille_dots);
     }

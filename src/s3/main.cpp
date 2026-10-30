@@ -17,7 +17,8 @@
 #include <BISINDO_inferencing.h>
 #include <esp_heap_caps.h>
 #include "audio_manager.h"
-#include "braille_keypad.h"
+#include "braille_keypad.h"  // Keypad Braille (forward-decl softap_add_event di dalamnya)
+#include "softap_server.h"   // SoftAP Web Dashboard (aktif jika -DENABLE_SOFTAP)
 
 // ─── Instance Global Audio Manager ──────────────────────────────────────────
 AudioManager audio;
@@ -369,6 +370,9 @@ void setup() {
   // 5. Inisialisasi Modul Suara DFPlayer Mini (TX:1, RX:2, BUSY:42)
   audio.begin();
 
+  // 6. Inisialisasi SoftAP Web Dashboard (opsional — aktif jika -DENABLE_SOFTAP)
+  softap_begin();
+
   delay(500);
 }
 
@@ -377,7 +381,28 @@ void loop() {
   // [1] Pindai keypad matriks 4x4
   braille_keypad_update();
 
-  // [2] Mode Braille: Monitoring Utama pada TFT & Dashboard Telemetry pada OLED
+  // [2] Proses request WebServer SoftAP (non-blocking, ~0 ms jika tidak ada request)
+  softap_handle();
+
+  // [3] Tampilkan pesan dari perawat ke layar TFT (jika ada pesan baru dari dashboard)
+  if (softap_has_nurse_message()) {
+    String nurse_msg = softap_get_nurse_message();
+    // Tampilkan teks perawat di area bawah TFT (baris pesan, warna putih pada bg hijau gelap)
+    tft.setRotation(current_device_mode == MODE_BRAILLE ? TFT_ROTATION_BRAILLE : TFT_ROTATION_CAMERA);
+    tft.fillRect(0, 95, 160, 33, 0x0640);          // Area pesan hijau gelap
+    tft.drawFastHLine(0, 95, 160, ST77XX_GREEN);
+    tft.setTextColor(ST77XX_WHITE, 0x0640);
+    tft.setTextSize(1);
+    tft.setCursor(4, 100);
+    tft.print("Perawat:");
+    tft.setCursor(4, 113);
+    // Potong teks agar muat di 160px lebar (maks ~26 karakter font-size-1)
+    if (nurse_msg.length() > 26) nurse_msg = nurse_msg.substring(0, 25) + ".";
+    tft.print(nurse_msg);
+    Serial.printf("[TFT] Pesan perawat ditampilkan: \"%s\"\n", nurse_msg.c_str());
+  }
+
+  // [4] Mode Braille: Monitoring Utama pada TFT & Dashboard Telemetry pada OLED
   if (current_device_mode == MODE_BRAILLE) {
     if (tft_butuh_update_mode) {
       tft.setRotation(TFT_ROTATION_BRAILLE); // Rotasi 180° agar posisi layar tidak terbalik saat memakai keypad Braille
@@ -398,7 +423,7 @@ void loop() {
     tft_butuh_update_mode = false;
   }
 
-  // [3] Mode AI BISINDO: minta frame dari kamera ESP32-CAM via UART
+  // [5] Mode AI BISINDO: minta frame dari kamera ESP32-CAM via UART
   if (minta_dan_baca_frame()) {
     // Tampilkan viewfinder kamera secara real-time ke TFT ST7735S
     tampilkan_preview_tft();
@@ -514,6 +539,13 @@ void loop() {
 
             Serial.printf("[AI BISINDO] Isyarat Terkunci: %s -> Kalimat: %s\n",
                           best_label.c_str(), kalimat.c_str());
+
+            // Catat event ke SoftAP Dashboard log
+            {
+              String label_bersih = best_label;
+              label_bersih.replace('_', ' ');
+              softap_add_event("AI BISINDO", label_bersih.c_str());
+            }
 
             // Output suara via DFPlayer Mini
             if (is_word) {

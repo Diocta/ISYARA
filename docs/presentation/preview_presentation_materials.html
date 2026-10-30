@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ISYARA — Preview Media Presentasi (X-Banner & Poster Lipat)</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+        }
+        body {
+            background: #090d16;
+            color: #f8fafc;
+            padding: 24px;
+        }
+        .header {
+            max-width: 1400px;
+            margin: 0 auto 30px auto;
+            background: rgba(19, 28, 48, 0.8);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            border-radius: 16px;
+            padding: 24px 32px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+        .header h1 {
+            font-size: 26px;
+            color: #38bdf8;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .header p {
+            color: #94a3b8;
+            font-size: 14px;
+            margin-top: 4px;
+        }
+        .nav-tabs {
+            display: flex;
+            gap: 12px;
+        }
+        .tab-btn {
+            background: #1e293b;
+            color: #cbd5e1;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .tab-btn:hover {
+            background: #334155;
+            color: #fff;
+            border-color: #38bdf8;
+        }
+        .tab-btn.active {
+            background: #0284c7;
+            color: #fff;
+            border-color: #38bdf8;
+            box-shadow: 0 0 16px rgba(2, 132, 199, 0.4);
+        }
+        .main-container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .preview-card {
+            background: rgba(19, 28, 48, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 30px;
+        }
+        .preview-card h2 {
+            font-size: 20px;
+            color: #34d399;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .preview-card .meta {
+            font-size: 13px;
+            color: #94a3b8;
+            margin-bottom: 20px;
+        }
+        .img-wrapper {
+            background: #050810;
+            border-radius: 12px;
+            padding: 12px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            overflow: auto;
+        }
+        .img-wrapper img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+        }
+        .download-bar {
+            margin-top: 16px;
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+        .action-btn {
+            background: #0f766e;
+            color: #fff;
+            text-decoration: none;
+            padding: 8px 18px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: 0.2s;
+        }
+        .action-btn:hover {
+            background: #14b8a6;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>🎨 ISYARA — Presentation Materials (AITC UNAIR 2026)</h1>
+            <p>Desain Resmi Siap Cetak: Standing X-Banner (60x160cm) & Poster Lipat Brosur A4 Trifold</p>
+        </div>
+        <div class="nav-tabs">
+            <button class="tab-btn active" onclick="showSection('banner')">🚩 X-Banner (1701×4535)</button>
+            <button class="tab-btn" onclick="showSection('poster-luar')">📄 Poster Lipat Luar</button>
+            <button class="tab-btn" onclick="showSection('poster-dalam')">📖 Poster Lipat Dalam</button>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <!-- SECTION 1: X BANNER -->
+        <div id="sec-banner" class="preview-card">
+            <h2>🚩 Standing X-Banner (1701 × 4535 px)</h2>
+            <div class="meta">Ukuran Rasio Standar 60 × 160 cm (Standing Banner Lomba) • Resolusi Tinggi Siap Cetak Digital Printing</div>
+            <div class="img-wrapper" style="max-height: 850px;">
+                <img src="x_banner_isyara.png" alt="X-Banner ISYARA" style="max-height: 800px;">
+            </div>
+            <div class="download-bar">
+                <a href="x_banner_isyara.png" download class="action-btn">📥 Unduh X-Banner PNG (1701x4535)</a>
+            </div>
+        </div>
+
+        <!-- SECTION 2: POSTER LIPAT LUAR -->
+        <div id="sec-poster-luar" class="preview-card" style="display: none;">
+            <h2>📄 Poster Lipat / Brosur Trifold — Halaman Luar (3508 × 2480 px)</h2>
+            <div class="meta">Format Standar A4 Landscape (3 Lipatan: Flap Masuk, Back Cover & Tim, Front Cover Utama) • Resolusi 300 DPI</div>
+            <div class="img-wrapper">
+                <img src="poster_lipat_luar.png" alt="Poster Lipat Luar">
+            </div>
+            <div class="download-bar">
+                <a href="poster_lipat_luar.png" download class="action-btn">📥 Unduh Halaman Luar PNG</a>
+                <a href="poster_lipat_isyara_printable.pdf" target="_blank" class="action-btn" style="background: #be185d;">🖨️ Buka / Cetak PDF (2 Halaman)</a>
+            </div>
+        </div>
+
+        <!-- SECTION 3: POSTER LIPAT DALAM -->
+        <div id="sec-poster-dalam" class="preview-card" style="display: none;">
+            <h2>📖 Poster Lipat / Brosur Trifold — Halaman Dalam (3508 × 2480 px)</h2>
+            <div class="meta">Tampilan Saat Brosur Dibuka Penuh (Mode 1 Vision AI BISINDO, Mode 2 Keyboard Braille, Arsitektur 2-Arah) • Resolusi 300 DPI</div>
+            <div class="img-wrapper">
+                <img src="poster_lipat_dalam.png" alt="Poster Lipat Dalam">
+            </div>
+            <div class="download-bar">
+                <a href="poster_lipat_dalam.png" download class="action-btn">📥 Unduh Halaman Dalam PNG</a>
+                <a href="poster_lipat_isyara_printable.pdf" target="_blank" class="action-btn" style="background: #be185d;">🖨️ Buka / Cetak PDF (2 Halaman)</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showSection(id) {
+            document.getElementById('sec-banner').style.display = (id === 'banner') ? 'block' : 'none';
+            document.getElementById('sec-poster-luar').style.display = (id === 'poster-luar') ? 'block' : 'none';
+            document.getElementById('sec-poster-dalam').style.display = (id === 'poster-dalam') ? 'block' : 'none';
+
+            const buttons = document.querySelectorAll('.tab-btn');
+            buttons.forEach(btn => btn.classList.remove('active'));
+            if (id === 'banner') buttons[0].classList.add('active');
+            if (id === 'poster-luar') buttons[1].classList.add('active');
+            if (id === 'poster-dalam') buttons[2].classList.add('active');
+        }
+    </script>
+</body>
+</html>
